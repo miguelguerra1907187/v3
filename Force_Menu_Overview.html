@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Force Menu — Features &amp; Scenarios</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:          #0D0E11;
+    --bg2:         #13151A;
+    --bg3:         #1A1D24;
+    --border:      #252830;
+    --border2:     #2E323D;
+    --text:        #E8EAF0;
+    --text2:       #9094A4;
+    --text3:       #5A5F72;
+    --green:       #1AE87A;
+    --green-dim:   #0F6E40;
+    --green-bg:    #071a10;
+    --yellow:      #FFD43B;
+    --yellow-dim:  #8A6D00;
+    --yellow-bg:   #1a1500;
+    --red:         #FF4D4D;
+    --red-dim:     #8A1F1F;
+    --red-bg:      #1a0808;
+    --purple:      #B09EFF;
+    --purple-dim:  #5E52B0;
+    --purple-bg:   #120f2a;
+    --blue:        #4C8DF6;
+    --blue-dim:    #1F3F78;
+    --blue-bg:     #0b1424;
+    --orange:      #F29F05;
+    --orange-dim:  #8A5000;
+    --orange-bg:   #1a0e00;
+    --gray:        #555A6B;
+    --gray-bg:     #13151a;
+    --mono:        'IBM Plex Mono', Consolas, 'Courier New', monospace;
+    --sans:        'IBM Plex Sans', 'Segoe UI', Arial, sans-serif;
+    --radius:      10px;
+    --radius-lg:   16px;
+  }
+
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 15px; line-height: 1.6; min-height: 100vh; }
+
+  /* ── HEADER ── */
+  .header { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 2.5rem 3rem 2rem; }
+  .header-badge { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11px; font-weight: 600;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--text3); background: var(--bg3); border: 1px solid var(--border);
+    padding: 5px 12px; border-radius: 4px; margin-bottom: 1rem; }
+  .header-badge .dot { width: 6px; height: 6px; background: var(--green); border-radius: 50%; display: inline-block; }
+  h1 { font-size: 2rem; font-weight: 600; color: var(--text); line-height: 1.2; }
+  h1 span { color: var(--text2); font-weight: 300; }
+  .header-meta { margin-top: 0.75rem; color: var(--text2); font-size: 14px; max-width: 820px; }
+  .header-stats { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 1.5rem; }
+  .hstat { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.75rem 1.25rem; min-width: 150px; }
+  .hstat-label { font-size: 11px; color: var(--text3); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.08em; }
+  .hstat-val { font-size: 1.4rem; font-family: var(--mono); font-weight: 600; margin-top: 2px; }
+  .hstat-val.g { color: var(--green); } .hstat-val.b { color: var(--blue); } .hstat-val.o { color: var(--orange); } .hstat-val.p { color: var(--purple); }
+
+  /* ── LAYOUT ── */
+  .main { max-width: 1100px; margin: 0 auto; padding: 2.5rem 2rem 4rem; }
+  .section-head { display: flex; align-items: center; gap: 12px; margin: 3rem 0 1.25rem; flex-wrap: wrap; }
+  .section-num { font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--text3); background: var(--bg3);
+    border: 1px solid var(--border); border-radius: 4px; padding: 3px 9px; letter-spacing: 0.05em; }
+  .section-title { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text2); }
+
+  .info-box { background: var(--bg2); border: 1px solid var(--border2); border-left: 3px solid var(--yellow); border-radius: var(--radius);
+    padding: 1.1rem 1.5rem; margin-bottom: 1.5rem; font-size: 14px; color: var(--text2); line-height: 1.8; }
+  .info-box strong { color: var(--text); font-weight: 500; }
+  .hl-g { color: var(--green); font-family: var(--mono); } .hl-b { color: var(--blue); font-family: var(--mono); }
+  .hl-o { color: var(--orange); font-family: var(--mono); } .hl-p { color: var(--purple); font-family: var(--mono); }
+
+  /* ── CARDS ── */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .cards-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+  .cards-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 12px; }
+  .card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1.1rem 1.25rem; display: flex; flex-direction: column; gap: 8px; }
+  .card.c-green  { border-left: 3px solid var(--green);  border-radius: 0 var(--radius-lg) var(--radius-lg) 0; }
+  .card.c-yellow { border-left: 3px solid var(--yellow); border-radius: 0 var(--radius-lg) var(--radius-lg) 0; }
+  .card.c-red    { border-left: 3px solid var(--red);    border-radius: 0 var(--radius-lg) var(--radius-lg) 0; }
+  .card.c-purple { border-left: 3px solid var(--purple); border-radius: 0 var(--radius-lg) var(--radius-lg) 0; }
+  .card.c-blue   { border-left: 3px solid var(--blue);   border-radius: 0 var(--radius-lg) var(--radius-lg) 0; }
+  .card.c-orange { border-left: 3px solid var(--orange); border-radius: 0 var(--radius-lg) var(--radius-lg) 0; }
+  .card.c-gray   { border-left: 3px solid var(--gray);   border-radius: 0 var(--radius-lg) var(--radius-lg) 0; }
+
+  .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-family: var(--mono); font-weight: 600; padding: 3px 9px;
+    border-radius: 4px; letter-spacing: 0.05em; text-transform: uppercase; width: fit-content; }
+  .badge-green  { background: var(--green-bg);  color: var(--green);  border: 1px solid var(--green-dim);  }
+  .badge-yellow { background: var(--yellow-bg); color: var(--yellow); border: 1px solid var(--yellow-dim); }
+  .badge-red    { background: var(--red-bg);    color: var(--red);    border: 1px solid var(--red-dim);    }
+  .badge-purple { background: var(--purple-bg); color: var(--purple); border: 1px solid var(--purple-dim); }
+  .badge-blue   { background: var(--blue-bg);   color: var(--blue);   border: 1px solid var(--blue-dim);   }
+  .badge-orange { background: var(--orange-bg); color: var(--orange); border: 1px solid var(--orange-dim); }
+  .badge-gray   { background: var(--gray-bg);   color: var(--gray);   border: 1px solid #2e323d;           }
+
+  .card-title { font-size: 13px; font-weight: 600; color: var(--text); }
+  .card-desc  { font-size: 12px; color: var(--text2); line-height: 1.6; }
+  .card-desc strong { color: var(--text); font-weight: 500; }
+
+  /* cajita negra tipo pantalla / nota */
+  .term { background: #000; border: 1px solid #222; border-radius: 8px; padding: 10px 14px; margin-top: 4px; font-family: var(--mono);
+    font-size: 12px; font-weight: 600; line-height: 1.85; color: #555; overflow-wrap: anywhere; }
+  .tw { color: #fff; } .tg { color: #1AE87A; } .ty { color: #FFD43B; } .tr { color: #FF4D4D; } .tp { color: #B09EFF; }
+  .tb { color: #4C8DF6; } .to { color: #F29F05; } .td { color: #444; }
+  .note-label { font-size: 10px; color: var(--text3); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 4px; }
+
+  /* mensajes en pantalla */
+  .msg { display: inline-flex; flex-direction: column; align-items: center; background: #000; border: 1px solid #222; border-radius: 6px;
+    padding: 5px 14px; font-family: var(--mono); font-weight: 700; line-height: 1.25; min-width: 170px; }
+  .msg .big { font-size: 15px; letter-spacing: 0.06em; }
+  .msg .small { font-size: 9px; color: #888; letter-spacing: 0.08em; }
+
+  /* ── HOW IT WORKS ── */
+  .how-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+  .how-step { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1.1rem 1.25rem; }
+  .step-num { font-family: var(--mono); font-size: 28px; font-weight: 600; color: var(--border2); line-height: 1; margin-bottom: 8px; }
+  .step-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+  .step-desc  { font-size: 12px; color: var(--text2); line-height: 1.6; }
+  .step-desc strong { color: var(--text); font-weight: 500; }
+
+  /* ── TABLES ── */
+  .breakdown-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1.25rem 1.5rem; overflow-x: auto; }
+  .bk-table { width: 100%; border-collapse: collapse; font-size: 12px; font-family: var(--mono); }
+  .bk-table th { color: var(--text3); font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; padding: 0 10px 8px 0;
+    border-bottom: 1px solid var(--border); text-align: left; }
+  .bk-table td { padding: 7px 10px 7px 0; border-bottom: 1px solid var(--border); color: var(--text2); vertical-align: top; }
+  .bk-table tr:last-child td { border-bottom: none; }
+  .bk-table td:first-child { color: var(--text); font-weight: 500; white-space: nowrap; }
+  .who-c { color: var(--blue) !important; } .who-t { color: var(--green) !important; }
+  .note-small { font-size: 11px; color: var(--text3); background: var(--bg3); border: 1px solid var(--border); border-radius: 6px;
+    padding: 7px 12px; margin-top: 10px; font-family: var(--mono); line-height: 1.7; }
+
+  /* ── KEYS ── */
+  .shortcuts { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 0.5rem; }
+  .shortcut { display: flex; align-items: center; gap: 10px; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 0.6rem 1rem; flex: 1; min-width: 230px; }
+  .key { font-family: var(--mono); font-size: 12px; font-weight: 600; background: var(--bg3); border: 1px solid var(--border2);
+    border-bottom: 2px solid var(--border2); border-radius: 5px; padding: 3px 8px; color: var(--text); white-space: nowrap; }
+  .shortcut-desc { font-size: 12px; color: var(--text2); line-height: 1.45; }
+  .shortcut-desc strong { color: var(--text); font-weight: 500; }
+
+  .divider { border: none; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+  .footer { background: var(--bg2); border-top: 1px solid var(--border); padding: 1.5rem 3rem; font-size: 12px; color: var(--text3);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; }
+
+  /* ── REPLICA DEL MENU REAL (mismos colores y forma) ── */
+  .menus { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 16px; }
+  .shot { display: flex; flex-direction: column; gap: 8px; }
+  .shot-cap { font-size: 11px; color: var(--text3); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.08em; }
+  .shot-cap b { color: var(--text2); font-weight: 600; }
+  .fm { --ac: #4C8DF6; --acs: rgba(76,141,246,.2); background: #16191D; border: 1px solid var(--ac); border-radius: 12px; overflow: hidden;
+    font-family: 'Segoe UI', Arial, sans-serif; color: #E6EAEE; text-transform: uppercase; box-shadow: 0 8px 30px rgba(0,0,0,.45); }
+  .fm.haz { --ac: #F29F05; --acs: rgba(242,159,5,.2); }
+  .fm.dim { --ac: #7E8893; --acs: rgba(126,136,147,.2); }
+  .fm-head { background: var(--acs); color: var(--ac); font-size: 13px; font-weight: 600; padding: 9px 16px; }
+  .fm-body { padding: 12px 16px 10px; }
+  .fm-prev { background: #1F242A; border-radius: 6px; padding: 8px 10px; margin: 0 16px 12px; }
+  .fm-prev .lab { font-size: 11px; color: #7E8893; }
+  .fm-prev .lab + .txt + .lab { margin-top: 6px; }
+  .fm-prev .txt { font-family: Consolas, 'Courier New', monospace; font-size: 13px; color: #E6EAEE; overflow-wrap: anywhere; }
+  .fm-keys { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 0 16px 14px; font-size: 11px; color: #7E8893; }
+  .fm-keys span { display: inline-flex; align-items: center; gap: 6px; }
+  .kc { display: inline-block; min-width: 24px; text-align: center; background: #2A3038; border: 1px solid #3A424C; border-bottom-width: 2px;
+    border-radius: 4px; padding: 0 6px; font-size: 11px; font-weight: 600; color: #E6EAEE; line-height: 1.5; }
+  .kc.on { border-color: var(--ac); }
+  .tiles { display: flex; justify-content: center; gap: 16px; }
+  .tile { width: 46%; height: 118px; border: 2px solid; border-radius: 10px; background: #1F242A; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 4px; }
+  .tile .kc { margin-bottom: 4px; }
+  .tile .big { font-size: 28px; font-weight: 700; line-height: 1.1; }
+  .tile .sub { font-size: 11px; color: #7E8893; }
+  .alt { text-align: center; font-size: 11px; color: #7E8893; margin-top: 10px; }
+  .pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .cell { min-height: 64px; border-radius: 8px; border: 1px solid #3A424C; background: #1F242A; padding: 6px 8px 7px; font-size: 12.5px; }
+  .cell .lbl { margin-top: 5px; line-height: 1.25; }
+  .cell.hl { background: var(--acs); border-color: var(--ac); font-weight: 600; }
+  .cell.sel { border-color: var(--ac); }
+  .cell.sel .lbl { color: var(--ac); font-weight: 600; }
+  .cell.off { opacity: .25; }
+  .cell .ck { color: var(--ac); font-weight: 700; margin-left: 6px; font-size: 14px; }
+  .rv { font-size: 15px; } .rv .n { display: inline-block; width: 22px; color: #7E8893; font-size: 14px; }
+  .rv-hold { margin-top: 10px; font-size: 12px; color: #7E8893; }
+  .digits { display: flex; gap: 8px; margin-top: 6px; }
+  .digit { width: 52px; height: 60px; border: 2px solid #3A424C; border-radius: 8px; background: #1F242A; color: var(--ac); font-size: 28px;
+    font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .digit.on { border-color: var(--ac); }
+  /* avisos de arriba (como en pantalla: letras grandes tenues + pastilla) */
+  .avisos { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 12px; }
+  .aviso { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 10px 12px 12px; display: flex; flex-direction: column; align-items: center; }
+  .aviso .ghost { font-family: 'Segoe UI', Arial, sans-serif; font-size: 34px; font-weight: 700; opacity: .25; line-height: 1.1; }
+  .aviso .pill { margin-top: -6px; border: 1.5px solid; border-radius: 999px; padding: 4px 12px; font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 12px; font-weight: 700; color: #fff; background: rgba(15,17,20,.6); text-align: center; }
+  .aviso .time { margin-top: 3px; font-size: 9px; font-weight: 600; color: #C9D1D9; background: rgba(15,17,20,.5); border-radius: 999px; padding: 1px 8px; font-family: 'Segoe UI', Arial, sans-serif; }
+  .aviso .what { margin-top: 8px; font-size: 12px; color: var(--text2); text-align: center; line-height: 1.45; }
+  @media (max-width: 640px) { .header { padding: 2rem 1.25rem 1.5rem; } .main { padding: 2rem 1rem 3rem; } .footer { padding: 1.25rem; } }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-badge"><span class="dot"></span> Trouble bill helper</div>
+  <h1>Force Menu <span>— Features &amp; Scenarios</span></h1>
+  <p class="header-meta">A keyboard helper for trouble bills. It writes the FORCE 1 / FORCE 2 notes in the standard wording and enters them on screen with the same clicks and keystrokes a person would use. The clerk always reviews and saves every note.</p>
+  <p class="header-meta" style="margin-top:6px; color:var(--text3); font-size:13px;">Prepared by <strong style="color:var(--text)">Miguel Alejandro Guerra Sifuentes</strong> &nbsp;·&nbsp; Biller &nbsp;·&nbsp; 2pm–11pm &nbsp;·&nbsp; Central Transport México</p>
+  <div class="header-stats">
+    <div class="hstat"><div class="hstat-label">FORCE 1 sequence</div><div class="hstat-val b">~7 sec</div></div>
+    <div class="hstat"><div class="hstat-label">FORCE 2 sequence</div><div class="hstat-val o">~11 sec</div></div>
+    <div class="hstat"><div class="hstat-label">Saved by the clerk</div><div class="hstat-val g">100%</div></div>
+    <div class="hstat"><div class="hstat-label">Bill data stored</div><div class="hstat-val g">None</div></div>
+  </div>
+</div>
+
+<div class="main">
+
+  <!-- PREVIEW -->
+  <div class="section-head" style="margin-top:1rem">
+    <span class="section-num">Preview</span>
+    <span class="section-title">What you see on screen while working</span>
+  </div>
+  <div style="background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:1.5rem 1.75rem;">
+    <p style="font-size:13px; color:var(--text2); margin-bottom:1.25rem; line-height:1.7;">
+      Pressing <strong style="color:var(--text)">Del</strong> opens the menu over the current screen. Each screen shows only what can be chosen at that moment, numbered like the numeric keypad, and the box at the bottom always shows the note as it will be written. These are the menu screens of a FORCE 1 and a FORCE 2, redrawn for this page:
+    </p>
+    <div class="menus">
+
+      <div class="shot">
+        <div class="shot-cap"><b>1 · Choose type</b></div>
+        <div class="fm dim">
+          <div class="fm-head">Choose type</div>
+          <div class="fm-body">
+            <div class="tiles">
+              <div class="tile" style="border-color:#4C8DF6"><span class="kc" style="border-color:#4C8DF6">1</span><span class="big" style="color:#4C8DF6">F1</span><span class="sub">f1 note</span></div>
+              <div class="tile" style="border-color:#F29F05"><span class="kc" style="border-color:#F29F05">2</span><span class="big" style="color:#F29F05">F2</span><span class="sub">hazmat + hold</span></div>
+            </div>
+            <div class="alt">Or Left / Right arrows</div>
+          </div>
+          <div class="fm-keys"><span><span class="kc">Del</span> close</span></div>
+        </div>
+      </div>
+
+      <div class="shot">
+        <div class="shot-cap"><b>2 · Options</b> — several can be marked</div>
+        <div class="fm">
+          <div class="fm-head">Force 1 &rsaquo; missing page</div>
+          <div class="fm-body">
+            <div class="pad">
+              <div class="cell"><span class="kc">4</span><div class="lbl">special instructions</div></div>
+              <div class="cell off"><span class="kc">5</span></div>
+              <div class="cell off"><span class="kc">6</span></div>
+              <div class="cell"><span class="kc">1</span><div class="lbl">missing page</div></div>
+              <div class="cell sel"><span class="kc on">2</span><span class="ck">✓</span><div class="lbl">with breakdown</div></div>
+              <div class="cell hl sel"><span class="kc on">3</span><span class="ck">✓</span><div class="lbl">po</div></div>
+            </div>
+          </div>
+          <div class="fm-prev"><div class="lab">Note</div><div class="txt">F1-...</div></div>
+          <div class="fm-keys"><span><span class="kc">1-9</span> mark</span><span><span class="kc">Enter</span> done</span><span><span class="kc">Arrows</span> move</span><span><span class="kc">Esc</span> back</span><span><span class="kc">Del</span> close</span></div>
+        </div>
+      </div>
+
+      <div class="shot">
+        <div class="shot-cap"><b>3 · Review</b> — Enter starts the sequence</div>
+        <div class="fm">
+          <div class="fm-head">Force 1 &rsaquo; review</div>
+          <div class="fm-body">
+            <div class="rv"><span class="n">1.</span>missing page with breakdown,po</div>
+            <div class="rv-hold">No hold: Enter = note</div>
+          </div>
+          <div class="fm-prev"><div class="lab">ERP note</div><div class="txt">F1-MISSING PAGE WITH BREAKDOWN,PO</div></div>
+          <div class="fm-keys"><span><span class="kc">Enter</span> ERP note</span><span><span class="kc">Insert</span> add another</span><span><span class="kc">Esc</span> remove last</span><span><span class="kc">Del</span> close</span></div>
+        </div>
+      </div>
+
+      <div class="shot">
+        <div class="shot-cap"><b>4 · Terminal</b> — only for a hold (FORCE 2)</div>
+        <div class="fm haz">
+          <div class="fm-head">Force 2&nbsp; haz &rsaquo; terminal</div>
+          <div class="fm-body">
+            <div style="font-size:11px; color:#7E8893">Terminal</div>
+            <div class="digits"><div class="digit on">5</div><div class="digit on">1</div><div class="digit on">2</div></div>
+          </div>
+          <div class="fm-prev"><div class="lab">Page 1</div><div class="txt">HOLD AT TERM 512 DUE TO HAZ-NO HAZMAT INFO</div><div class="lab">ERP</div><div class="txt">HAZ-NO HAZMAT INFO</div></div>
+          <div class="fm-keys"><span><span class="kc">0-9</span> terminal</span><span><span class="kc">Backspace</span> delete</span><span><span class="kc">Enter</span> copy</span><span><span class="kc">Esc</span> back</span><span><span class="kc">Del</span> close</span></div>
+        </div>
+      </div>
+
+    </div>
+
+    <p style="font-size:13px; color:var(--text2); margin:1.75rem 0 1rem; line-height:1.7;">
+      While the tool is entering a note, a short message appears at the top of the screen. Those messages are the only other thing it shows:
+    </p>
+    <div class="avisos">
+      <div class="aviso"><div class="ghost" style="color:#E5484D">WAIT</div><div class="pill" style="border-color:#E5484D">DON'T MOVE</div><div class="what">The tool is working — don't touch the mouse or keyboard.</div></div>
+      <div class="aviso"><div class="ghost" style="color:#3FB950">ENTER</div><div class="pill" style="border-color:#3FB950">PRESS ENTER</div><div class="what">Review the ERP note and save it (Enter or Alt+O).</div></div>
+      <div class="aviso"><div class="ghost" style="color:#3FB950">VERIFY</div><div class="pill" style="border-color:#3FB950">VERIFY AND SAVE</div><div class="time">F1 OK IN 6.4 S</div><div class="what">Review the Page 1 note and save it. The small line shows how long the automatic part took.</div></div>
+      <div class="aviso"><div class="ghost" style="color:#F29F05">CHECK</div><div class="pill" style="border-color:#F29F05">SAME NUMBER AS THE LAST BILL - VERIFY AND SAVE</div><div class="what">The copied number matches the previous bill — double-check before saving.</div></div>
+    </div>
+  </div>
+
+  <!-- WHY -->
+  <div class="section-head">
+    <span class="section-num">Why</span>
+    <span class="section-title">Why this improvement is needed</span>
+  </div>
+  <div class="info-box">
+    Every trouble bill needs the same routine: a <strong>force note</strong> in the ERP (Special Instructions), a <strong>search of the bill number</strong> on Page 1 — and on Page 2 for hazmat, to see the terminal — and an <strong>informational note</strong> on Page 1, often with a <span class="hl-o">"Hold at term ### DUE TO ..."</span> text. Done by hand, that is the same copy, paste, switch window, search and type, dozens of times per shift.
+  </div>
+  <div class="cards">
+    <div class="card c-red">
+      <div class="badge badge-red">✗ Repetitive</div>
+      <div class="card-title">The same steps on every bill</div>
+      <div class="card-desc">Copy the number, switch windows, paste, search, open the note screen, choose the type, type the note. Every time.</div>
+    </div>
+    <div class="card c-yellow">
+      <div class="badge badge-yellow">◑ Inconsistent</div>
+      <div class="card-title">Wording changes from person to person</div>
+      <div class="card-desc">Free-typed notes vary. The menu always produces the same standard wording for the same issue.</div>
+    </div>
+    <div class="card c-red">
+      <div class="badge badge-red">✗ Easy to get wrong</div>
+      <div class="card-title">Small mistakes are costly</div>
+      <div class="card-desc">A typo in the terminal, the previous bill's note pasted again, or the search showing the previous number are easy to miss when working fast.</div>
+    </div>
+    <div class="card c-green">
+      <div class="badge badge-green">✓ With Force Menu</div>
+      <div class="card-title">A few keys, then review and save</div>
+      <div class="card-desc">The clerk picks the issue; the tool does the clicks and typing; the clerk checks the result and saves it personally.</div>
+    </div>
+  </div>
+
+  <!-- OVERVIEW -->
+  <div class="section-head">
+    <span class="section-num">Overview</span>
+    <span class="section-title">What is this tool?</span>
+  </div>
+  <div class="how-grid">
+    <div class="how-step"><div class="step-num">01</div><div class="step-title">Opens with one key</div><div class="step-desc">Press <strong>Del</strong> and the menu appears over the current screen. Press it again and it closes. Nothing else stays open on screen.</div></div>
+    <div class="how-step"><div class="step-num">02</div><div class="step-title">Choose by elimination</div><div class="step-desc">Pick <strong>FORCE 1</strong> or <strong>FORCE 2</strong>. From then on only that type's issues are shown, and inside an issue only its own options.</div></div>
+    <div class="how-step"><div class="step-num">03</div><div class="step-title">Combine several reasons</div><div class="step-desc">Several options can be marked with the numeric keypad. Each one is written once, separated by commas: <strong>f1-missing page with breakdown,po</strong>.</div></div>
+    <div class="how-step"><div class="step-num">04</div><div class="step-title">Writes the ERP note</div><div class="step-desc">Opens Special Instructions, types FORCE1 or FORCE2 and the note, then stops with <strong style="color:var(--green)">PRESS ENTER</strong>. The clerk reviews and saves.</div></div>
+    <div class="how-step"><div class="step-num">05</div><div class="step-title">Looks up the bill</div><div class="step-desc">After the clerk saves, it copies the bill number, closes the bill and searches the number on <strong>Page 1</strong> — and on <strong>Page 2</strong> for FORCE 2 or a hold.</div></div>
+    <div class="how-step"><div class="step-num">06</div><div class="step-title">Asks only for the terminal</div><div class="step-desc">For a hold, the clerk types just the terminal number. The tool builds the full <strong>"Hold at term ### DUE TO ..."</strong> text.</div></div>
+    <div class="how-step"><div class="step-num">07</div><div class="step-title">Writes the Page 1 note</div><div class="step-desc">Opens the notes screen, chooses <strong>Informational</strong>, pastes the note and stops with <strong style="color:var(--green)">VERIFY AND SAVE</strong>.</div></div>
+    <div class="how-step"><div class="step-num">08</div><div class="step-title">Shows how long it took</div><div class="step-desc">The final message includes a small line like <strong>F1 OK IN 6.4 S</strong> — only the automatic part, not the clerk's own time.</div></div>
+  </div>
+
+  <!-- SECTION 1: TYPES -->
+  <div class="section-head">
+    <span class="section-num">Section 1</span>
+    <span class="section-title">The two note types — FORCE 1 and FORCE 2</span>
+  </div>
+  <div class="info-box" style="border-left-color: var(--text3); margin-bottom: 1rem;">
+    <span class="hl-b">FORCE 1</span> covers missing or unreadable information. <span class="hl-o">FORCE 2</span> covers hazmat and always carries a hold with a terminal. A FORCE 1 also carries a hold when the issue is with the consignee.
+  </div>
+  <div class="cards-2">
+    <div class="card c-blue">
+      <div class="badge badge-blue">F1 · FORCE 1</div>
+      <div class="card-title">Missing or unreadable information</div>
+      <div class="card-desc">Shipper info · consignee info · missing page (with breakdown, po, special instructions) · number sticker covering a field (bol, po, quote, weight, reference num, class, nmfc, hu) · illegible (same fields + accessorial and special instructions).</div>
+      <div class="note-label">Example ERP note</div>
+      <div class="term"><span class="tb">FORCE1</span> &nbsp;<span class="tw">f1-missing page with breakdown,po</span></div>
+    </div>
+    <div class="card c-orange">
+      <div class="badge badge-orange">F2 · FORCE 2 · Hazmat + hold</div>
+      <div class="card-title">Hazmat issues</div>
+      <div class="card-desc">Improper shipping name · no hazmat info · missing chemical constituent · weight breakdown · missing emergency contact · shipper certification not signed · prohibited freight · missing page · number sticker on a hazmat field (UN number, shipping name, hazard class, packing group, weight, pieces, emergency contact).</div>
+      <div class="note-label">Example ERP note</div>
+      <div class="term"><span class="to">FORCE2</span> &nbsp;<span class="tw">haz-sticker on un number</span></div>
+    </div>
+  </div>
+
+  <!-- SECTION 2: SEQUENCE -->
+  <div class="section-head">
+    <span class="section-num">Section 2</span>
+    <span class="section-title">The full sequence — who does what</span>
+  </div>
+  <div class="breakdown-card">
+    <table class="bk-table">
+      <thead><tr><th>Step</th><th>Who</th><th>What happens</th><th>Message</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td class="who-c">Clerk</td><td>Opens the menu (Del), chooses the type, the issue and its options, and presses Enter.</td><td>—</td></tr>
+        <tr><td>2</td><td class="who-t">Tool</td><td>Opens Special Instructions in the ERP and writes FORCE1 / FORCE2 and the note.</td><td style="color:var(--red)">DON'T MOVE</td></tr>
+        <tr><td>3</td><td class="who-c">Clerk</td><td>Reads the ERP note and saves it (Enter or Alt+O). Nothing is saved until the clerk does it.</td><td style="color:var(--green)">PRESS ENTER</td></tr>
+        <tr><td>4</td><td class="who-t">Tool</td><td>Copies the bill number, closes the bill and searches the number on Page 1.</td><td style="color:var(--red)">DON'T MOVE</td></tr>
+        <tr><td>5</td><td class="who-t">Tool</td><td><span style="color:var(--orange)">FORCE 2 / hold only:</span> opens the status screen and searches the number on Page 2, where the terminal is shown.</td><td style="color:var(--red)">DON'T MOVE</td></tr>
+        <tr><td>6</td><td class="who-c">Clerk</td><td><span style="color:var(--orange)">Hold only:</span> types the terminal number and presses Enter.</td><td>—</td></tr>
+        <tr><td>7</td><td class="who-t">Tool</td><td>Opens the notes screen on Page 1, chooses Informational and pastes the note.</td><td style="color:var(--red)">DON'T MOVE</td></tr>
+        <tr><td>8</td><td class="who-c">Clerk</td><td>Reads the Page 1 note and saves it.</td><td style="color:var(--green)">VERIFY AND SAVE</td></tr>
+      </tbody>
+    </table>
+    <div class="note-small">
+      The clerk saves both notes personally — the tool never presses Save.<br>
+      The small "F1 OK IN 6.4 S" under VERIFY AND SAVE shows how long the automatic part took (the clerk's own time is not counted).
+    </div>
+  </div>
+
+  <!-- SECTION 3: SCENARIOS -->
+  <div class="section-head">
+    <span class="section-num">Section 3</span>
+    <span class="section-title">Scenarios — what happens in each case</span>
+  </div>
+  <div class="cards-2" style="margin-bottom:12px">
+    <div class="card c-blue">
+      <div class="badge badge-blue">Scenario A — FORCE 1, no hold</div>
+      <div class="card-title">Missing page with breakdown and PO</div>
+      <div class="card-desc">The clerk chooses FORCE 1 › missing page › with breakdown + po. Only Page 1 is used.</div>
+      <div class="term">
+        <span class="td">ERP</span> &nbsp;<span class="tb">FORCE1</span> <span class="tw">f1-missing page with breakdown,po</span><br>
+        <span class="tg">PRESS ENTER</span> <span class="td">→ clerk saves</span><br>
+        <span class="td">number → Page 1 → notes → Informational</span><br>
+        <span class="td">Page 1</span> &nbsp;<span class="tw">f1-missing page with breakdown,po</span><br>
+        <span class="tg">VERIFY AND SAVE</span> <span class="td">·</span> <span class="tw">F1 OK IN 6.4 S</span>
+      </div>
+    </div>
+    <div class="card c-orange">
+      <div class="badge badge-orange">Scenario B — FORCE 2, hazmat with hold</div>
+      <div class="card-title">No hazmat information on the bill</div>
+      <div class="card-desc">The clerk chooses FORCE 2 › no hazmat info. The tool also searches Page 2 so the clerk can read the terminal.</div>
+      <div class="term">
+        <span class="td">ERP</span> &nbsp;<span class="to">FORCE2</span> <span class="tw">haz-no hazmat info</span><br>
+        <span class="tg">PRESS ENTER</span> <span class="td">→ clerk saves</span><br>
+        <span class="td">number → Page 1 → Page 2 (terminal)</span><br>
+        <span class="ty">TERMINAL?</span> <span class="td">→ clerk types</span> <span class="tw">512</span><br>
+        <span class="td">Page 1</span> &nbsp;<span class="tw">Hold at term 512 DUE TO haz-no hazmat info</span><br>
+        <span class="tg">VERIFY AND SAVE</span> <span class="td">·</span> <span class="tw">F2 OK IN 10.5 S</span>
+      </div>
+    </div>
+  </div>
+  <div class="cards-2" style="margin-bottom:12px">
+    <div class="card c-purple">
+      <div class="badge badge-purple">★ Scenario C — Several reasons in one note</div>
+      <div class="card-title">Numeric keypad multi-select</div>
+      <div class="card-desc">Marking several options adds them to the same note, each one only once and in order. A second issue can be added from the review screen with Insert.</div>
+      <div class="term">
+        <span class="tw">f1-missing page with breakdown,po</span><br>
+        <span class="tw">f1-ilegible accessorial,special instructions</span><br>
+        <span class="tw">haz-sticker on un number</span>
+      </div>
+    </div>
+    <div class="card c-yellow">
+      <div class="badge badge-yellow">⚠ Scenario D — Same number as the last bill</div>
+      <div class="card-title">Warns instead of blocking</div>
+      <div class="card-desc">If the copied number is the same as the previous bill's, the final message turns amber so the clerk double-checks before saving. Sometimes it is correct (the same bill again), so the tool never blocks it.</div>
+      <div class="term">
+        <span class="td">number copied</span> <span class="tw">= previous bill</span><br>
+        <span class="to">SAME NUMBER AS THE LAST BILL — VERIFY AND SAVE</span>
+      </div>
+    </div>
+  </div>
+  <div class="cards-2">
+    <div class="card c-red">
+      <div class="badge badge-red">! Scenario E — Prohibited freight</div>
+      <div class="card-title">Red reminder about the terminal</div>
+      <div class="card-desc">When the clerk chooses prohibited freight (FORCE 2), the review and terminal screens show a red reminder to use the <strong>current</strong> terminal, not the origin one. The clerk types the freight name and the terminal as usual.</div>
+      <div class="term">
+        <span class="tr">PROHIBITED: USE THE CURRENT TERMINAL (NOT THE ORIGIN ONE)</span><br>
+        <span class="td">ERP</span> &nbsp;<span class="tw">prohibited-</span><span class="td">(freight name)</span>
+      </div>
+    </div>
+    <div class="card c-red">
+      <div class="badge badge-red">✗ Scenario F — Something does not respond</div>
+      <div class="card-title">Stops and says where</div>
+      <div class="card-desc">If a window is not found or a step does not respond after its retries, the tool stops, removes DON'T MOVE and shows where it stopped. Nothing is saved; the clerk simply finishes that bill by hand.</div>
+      <div class="term">
+        <span class="tr">Stopped: ERP window not found</span><br>
+        <span class="td">no keys sent after the stop · nothing saved</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- SAFEGUARDS -->
+  <div class="section-head">
+    <span class="section-num">Safeguards</span>
+    <span class="section-title">Built-in protections against errors</span>
+  </div>
+  <div class="cards-2" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr));">
+    <div class="card c-green">
+      <div class="badge badge-green">Waits for the screen, not the clock</div>
+      <div class="card-title">Never types before a page is ready</div>
+      <div class="card-desc">Before each click it notes how a small area of the screen looks, and continues only when that area has changed and stopped moving — the same way a person sees that a page finished loading. If a page is slow, it waits longer instead of typing too early.</div>
+      <div class="term">
+        <span class="ty">Click</span> → page loading…<br>
+        <span class="tg">Area changed and is still</span> → continue<br>
+        <span class="to">Slow page</span> → keeps waiting (up to 2 extra sec)
+      </div>
+    </div>
+    <div class="card c-green">
+      <div class="badge badge-green">Retries before giving up</div>
+      <div class="card-title">Copying and typing the number are checked</div>
+      <div class="card-desc">If the bill number did not copy, it selects the whole field again and retries (up to 3 times). On Page 2 it checks that the number really appeared in the search box; if not, it clicks and types it once more.</div>
+      <div class="term">
+        <span class="tr">Copy empty</span> → select field again → <span class="tg">copied</span><br>
+        <span class="tr">Number not visible</span> → click + type again → <span class="tg">OK</span>
+      </div>
+    </div>
+    <div class="card c-green">
+      <div class="badge badge-green">Types the number</div>
+      <div class="card-title">Avoids searching the previous bill</div>
+      <div class="card-desc">The search box on Page 1 sometimes kept the previous number when it was pasted, even by hand. The tool types the number key by key instead, so the page always searches the new one.</div>
+    </div>
+    <div class="card c-green">
+      <div class="badge badge-green">The clerk stays in control</div>
+      <div class="card-title">Review and save is always manual</div>
+      <div class="card-desc">The tool never presses Save, never pastes the same note twice and never continues after a stop. Each sequence ends on a message that asks the clerk to verify.</div>
+    </div>
+  </div>
+
+  <!-- KEYS -->
+  <div class="section-head">
+    <span class="section-num">Controls</span>
+    <span class="section-title">Keyboard shortcuts</span>
+  </div>
+  <div class="shortcuts">
+    <div class="shortcut"><span class="key">Del</span><div class="shortcut-desc">Open / close the menu.</div></div>
+    <div class="shortcut"><span class="key">← / →</span><div class="shortcut-desc">Choose <strong style="color:var(--blue)">FORCE 1</strong> or <strong style="color:var(--orange)">FORCE 2</strong> (also 1 / 2).</div></div>
+    <div class="shortcut"><span class="key">Numpad 1–9</span><div class="shortcut-desc">Choose an option. In lists that allow it, mark several.</div></div>
+    <div class="shortcut"><span class="key">Enter</span><div class="shortcut-desc">Confirm. On the review screen it starts the sequence.</div></div>
+    <div class="shortcut"><span class="key">Insert</span><div class="shortcut-desc">On the review screen: add another issue to the same note.</div></div>
+    <div class="shortcut"><span class="key">Esc</span><div class="shortcut-desc">Go back. On the review screen: remove the last issue.</div></div>
+    <div class="shortcut"><span class="key">0-9 · Backspace</span><div class="shortcut-desc">Terminal screen: type / delete the terminal number.</div></div>
+    <div class="shortcut"><span class="key">Enter / Alt+O</span><div class="shortcut-desc">In the ERP: the clerk saves the note and the tool continues. <strong>Del</strong> cancels instead.</div></div>
+  </div>
+  <div class="note-small" style="margin-top:12px">
+    The first screen also lists the last notes used in the session; pressing 3, 4 or 5 copies one of them again. They are kept in memory only and are cleared when the tool closes.
+  </div>
+
+  <hr class="divider">
+
+  <!-- SECURITY -->
+  <div class="section-head">
+    <span class="section-num">Security</span>
+    <span class="section-title">Local only — no data enters or leaves the machine</span>
+  </div>
+  <div class="info-box" style="border-left-color: var(--green);">
+    Force Menu works only with the windows that are already open on the clerk's screen, using <strong>the same clicks, keystrokes and copy/paste a person uses</strong>. It has no network code of any kind — no <span class="hl-g">web requests</span>, no connections to servers or databases, no cloud. The bill number is held only in memory while a sequence runs and is <strong>never written to disk</strong>.
+  </div>
+  <div class="cards-2">
+    <div class="card c-green">
+      <div class="badge badge-green">No network activity</div>
+      <div class="card-title">Zero outbound or inbound connections</div>
+      <div class="card-desc">The script contains no networking calls at all — it cannot send anything out or bring anything in, even by accident. It does not touch the ERP's or the pages' data directly; it only works through the screen like a person.</div>
+    </div>
+    <div class="card c-green">
+      <div class="badge badge-green">No sensitive information stored</div>
+      <div class="card-title">Only step names and times are written</div>
+      <div class="card-desc">The only files it writes are timing logs: step names, milliseconds and character counts (for example "number copied (9 characters)"). They never contain bill numbers, terminals, customer names, addresses or note text.</div>
+    </div>
+  </div>
+  <div class="cards-2" style="margin-top:12px">
+    <div class="card c-green">
+      <div class="badge badge-green">Screen check: colors only</div>
+      <div class="card-title">Compares colors, reads no text, saves nothing</div>
+      <div class="card-desc">To know when a page finished loading, it looks at a small area of the screen and compares its colors in memory. No image is saved, no text is read, and nothing is kept after the comparison.</div>
+    </div>
+    <div class="card c-green">
+      <div class="badge badge-green">No installs, no admin rights</div>
+      <div class="card-title">One PowerShell script, already part of Windows</div>
+      <div class="card-desc">Nothing is installed, no services or scheduled tasks are created, and no administrator rights are needed. It does not modify the ERP, the pages or any company file. Closing it leaves nothing running.</div>
+    </div>
+  </div>
+  <div class="cards-2" style="margin-top:12px">
+    <div class="card c-gray">
+      <div class="badge badge-gray">Only its own keys</div>
+      <div class="card-title">Not a keylogger</div>
+      <div class="card-desc">It only checks whether its own shortcut keys are pressed — plus Enter / Alt+O while it waits for the clerk to save. It does not record or store anything that is typed.</div>
+    </div>
+    <div class="card c-gray">
+      <div class="badge badge-gray">Standard Windows functions</div>
+      <div class="card-title">Same permissions as any desktop utility</div>
+      <div class="card-desc">Moving the mouse, clicking, pressing keys, bringing a window to the front and reading a key state are ordinary, documented Windows operations — not privileged and not intrusive.</div>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- BEFORE / AFTER -->
+  <div class="section-head">
+    <span class="section-num">Comparison</span>
+    <span class="section-title">Before and after</span>
+  </div>
+  <div class="breakdown-card">
+    <table class="bk-table">
+      <thead><tr><th>Task</th><th>By hand</th><th>With Force Menu</th></tr></thead>
+      <tbody>
+        <tr><td>Write the force note</td><td>Type it from memory</td><td style="color:var(--green)">A few keys, standard wording</td></tr>
+        <tr><td>Hold note</td><td>Type "Hold at term ### DUE TO ..." + the reasons</td><td style="color:var(--green)">Type the terminal number only</td></tr>
+        <tr><td>Search the number (Page 1 + Page 2)</td><td>Copy, switch windows, paste, search, repeat</td><td style="color:var(--green)">Automatic, ~7 sec (F1) / ~11 sec (F2) for the whole sequence</td></tr>
+        <tr><td>Enter both notes</td><td>Open each screen, choose type, paste, check</td><td style="color:var(--green)">Automatic, then review and save</td></tr>
+        <tr><td>Wording</td><td>Varies by person</td><td style="color:var(--green)">Always the same for the same issue</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- QUICK REF -->
+  <div class="section-head">
+    <span class="section-num">Status</span>
+    <span class="section-title">Current status and next step</span>
+  </div>
+  <div class="cards-3">
+    <div class="card c-green">
+      <div class="badge badge-green">✓ Working</div>
+      <div class="card-title">Used on real trouble bills</div>
+      <div class="card-desc">Used during the shift on real FORCE 1 and FORCE 2 bills. The current version completes the full sequence reliably, with the clerk reviewing every note.</div>
+    </div>
+    <div class="card c-purple">
+      <div class="badge badge-purple">★ Tuned step by step</div>
+      <div class="card-title">Faster without losing reliability</div>
+      <div class="card-desc">Each step's waiting time was measured and reduced one level at a time, keeping only the versions that ran without errors. Latest runs: FORCE 1 in 6.4–7.3 sec, FORCE 2 in 10.3–10.8 sec.</div>
+    </div>
+    <div class="card c-blue">
+      <div class="badge badge-blue">Next</div>
+      <div class="card-title">Approval to keep using it</div>
+      <div class="card-desc">Continue using it under supervision and, if approved, make it available to other billers with the same screen setup.</div>
+    </div>
+  </div>
+
+</div><!-- /main -->
+
+<div class="footer">
+  <span>Force Menu — Features &amp; Scenarios Reference &nbsp;·&nbsp; Miguel Alejandro Guerra Sifuentes</span>
+  <span>Biller &nbsp;·&nbsp; 2pm–11pm &nbsp;·&nbsp; Central Transport México &nbsp;|&nbsp; Runs locally · no data in, no data out, nothing stored</span>
+</div>
+
+</body>
+</html>

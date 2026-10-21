@@ -1,0 +1,1520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BPH Counter Overlay — Billing Productivity Toolkit</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:          #0D0E11;
+    --bg2:         #13151A;
+    --bg3:         #1A1D24;
+    --border:      #252830;
+    --border2:     #2E323D;
+    --text:        #E8EAF0;
+    --text2:       #9094A4;
+    --text3:       #5A5F72;
+    --green:       #1AE87A;
+    --green-dim:   #0F6E40;
+    --green-bg:    #071a10;
+    --yellow:      #FFD43B;
+    --yellow-dim:  #8A6D00;
+    --yellow-bg:   #1a1500;
+    --red:         #FF4D4D;
+    --red-dim:     #8A1F1F;
+    --red-bg:      #1a0808;
+    --purple:      #B09EFF;
+    --purple-dim:  #5E52B0;
+    --purple-bg:   #120f2a;
+    --gray:        #555A6B;
+    --gray-bg:     #13151a;
+    --orange:      #FF9500;
+    --orange-dim:  #8A5000;
+    --orange-bg:   #1a0e00;
+    --mono:        'IBM Plex Mono', monospace;
+    --sans:        'IBM Plex Sans', sans-serif;
+    --radius:      10px;
+    --radius-lg:   16px;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.6;
+    padding: 0;
+    min-height: 100vh;
+  }
+
+  /* ── HEADER ── */
+  .header {
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    padding: 2.5rem 3rem 2rem;
+  }
+  .header-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 2rem;
+    flex-wrap: wrap;
+  }
+  .header-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text3);
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    padding: 5px 12px;
+    border-radius: 4px;
+    margin-bottom: 1rem;
+  }
+  .header-badge .dot { width: 6px; height: 6px; background: var(--green); border-radius: 50%; display: inline-block; }
+  h1 { font-size: 2rem; font-weight: 600; color: var(--text); line-height: 1.2; }
+  h1 span { color: var(--text2); font-weight: 300; }
+  .header-meta { margin-top: 0.75rem; color: var(--text2); font-size: 14px; }
+  .header-stats {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 1.5rem;
+  }
+  .hstat {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.75rem 1.25rem;
+    min-width: 140px;
+  }
+  .hstat-label { font-size: 11px; color: var(--text3); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.08em; }
+  .hstat-val { font-size: 1.4rem; font-family: var(--mono); font-weight: 600; margin-top: 2px; }
+  .hstat-val.g { color: var(--green); }
+  .hstat-val.y { color: var(--yellow); }
+  .hstat-val.p { color: var(--purple); }
+
+  /* ── LAYOUT ── */
+  .main { max-width: 1100px; margin: 0 auto; padding: 2.5rem 2rem 4rem; }
+
+  /* ── SECTION HEADERS ── */
+  .section-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 3rem 0 1.25rem;
+  }
+  .section-num {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text3);
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 9px;
+    letter-spacing: 0.05em;
+  }
+  .section-title {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text2);
+  }
+
+  /* ── INFO BOX ── */
+  .info-box {
+    background: var(--bg2);
+    border: 1px solid var(--border2);
+    border-left: 3px solid var(--yellow);
+    border-radius: var(--radius);
+    padding: 1.1rem 1.5rem;
+    margin-bottom: 1.5rem;
+    font-size: 14px;
+    color: var(--text2);
+    line-height: 1.8;
+  }
+  .info-box strong { color: var(--text); font-weight: 500; }
+  .info-box .hl-g { color: var(--green); font-family: var(--mono); }
+  .info-box .hl-y { color: var(--yellow); font-family: var(--mono); }
+  .info-box .hl-p { color: var(--purple); font-family: var(--mono); }
+
+  /* ── CARDS GRID ── */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .cards-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+  .cards-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+
+  .card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.1rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .card.c-green  { border-left: 3px solid var(--green);  border-radius: 0 var(--radius-lg) var(--radius-lg) 0; }
+  .card.c-yellow { border-left: 3px solid var(--yellow); border-radius: 0 var(--radius-lg) var(--radius-lg) 0; }
+  .card.c-red    { border-left: 3px solid var(--red);    border-radius: 0 var(--radius-lg) var(--radius-lg) 0; }
+  .card.c-purple { border-left: 3px solid var(--purple); border-radius: 0 var(--radius-lg) var(--radius-lg) 0; }
+  .card.c-gray   { border-left: 3px solid var(--gray);   border-radius: 0 var(--radius-lg) var(--radius-lg) 0; }
+  .card.c-orange { border-left: 3px solid var(--orange); border-radius: 0 var(--radius-lg) var(--radius-lg) 0; }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 10px;
+    font-family: var(--mono);
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 4px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    width: fit-content;
+  }
+  .badge-green  { background: var(--green-bg);  color: var(--green);  border: 1px solid var(--green-dim);  }
+  .badge-yellow { background: var(--yellow-bg); color: var(--yellow); border: 1px solid var(--yellow-dim); }
+  .badge-red    { background: var(--red-bg);    color: var(--red);    border: 1px solid var(--red-dim);    }
+  .badge-purple { background: var(--purple-bg); color: var(--purple); border: 1px solid var(--purple-dim); }
+  .badge-gray   { background: var(--gray-bg);   color: var(--gray);   border: 1px solid #2e323d;           }
+  .badge-orange { background: var(--orange-bg); color: var(--orange); border: 1px solid var(--orange-dim); }
+
+  .card-title { font-size: 13px; font-weight: 600; color: var(--text); }
+  .card-desc  { font-size: 12px; color: var(--text2); line-height: 1.6; }
+
+  /* ── OVERLAY MOCK ── */
+  .overlay-wrap { margin-top: 6px; }
+  .overlay-label { font-size: 10px; color: var(--text3); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
+  .overlay-mock {
+    display: inline-flex;
+    gap: 5px;
+    align-items: center;
+    font-family: var(--mono);
+    font-size: 16px;
+    font-weight: 600;
+    background: #000;
+    border: 1px solid #222;
+    padding: 4px 12px;
+    border-radius: 5px;
+  }
+  .sep { color: #333; }
+  .og { color: #1AE87A; }
+  .oy { color: #FFD43B; }
+  .or { color: #FF4D4D; }
+  .op { color: #B09EFF; }
+  .od { color: #444; }
+  .oo { color: #FF9500; }
+
+  /* ── REPORT MOCK ── */
+  .report-wrap {
+    background: #000;
+    border: 1px solid #222;
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-top: 8px;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.85;
+  }
+  .rw  { color: #fff; }
+  .rg  { color: #1AE87A; }
+  .ry  { color: #FFD43B; }
+  .rr  { color: #FF4D4D; }
+  .rp  { color: #B09EFF; }
+  .rd  { color: #444; }
+  .ro  { color: #ff8c00; }
+
+  /* ── BREAKDOWN TABLE ── */
+  .breakdown-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.25rem 1.5rem;
+  }
+  .bk-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    font-family: var(--mono);
+    margin-top: 0.75rem;
+  }
+  .bk-table th {
+    color: var(--text3);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 10px;
+    padding: 0 8px 8px 0;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+  }
+  .bk-table td {
+    padding: 5px 8px 5px 0;
+    border-bottom: 1px solid var(--border);
+    color: var(--text2);
+    vertical-align: middle;
+  }
+  .bk-table tr:last-child td { border-bottom: none; }
+  .bk-table td:first-child { color: var(--text); font-weight: 500; }
+  .note-small {
+    font-size: 11px;
+    color: var(--text3);
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 12px;
+    margin-top: 10px;
+    font-family: var(--mono);
+    line-height: 1.7;
+  }
+
+  /* ── KEYBOARD SHORTCUTS ── */
+  .shortcuts {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 0.5rem;
+  }
+  .shortcut {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.6rem 1rem;
+    flex: 1;
+    min-width: 180px;
+  }
+  .key {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    background: var(--bg3);
+    border: 1px solid var(--border2);
+    border-bottom: 2px solid var(--border2);
+    border-radius: 5px;
+    padding: 3px 8px;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .shortcut-desc { font-size: 12px; color: var(--text2); line-height: 1.4; }
+
+  /* ── DIVIDER ── */
+  .divider { border: none; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+
+  /* ── FOOTER ── */
+  .footer {
+    background: var(--bg2);
+    border-top: 1px solid var(--border);
+    padding: 1.5rem 3rem;
+    font-size: 12px;
+    color: var(--text3);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  /* ── COLOR LEGEND ── */
+  .legend {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-family: var(--mono);
+  }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ── HOW IT WORKS ── */
+  .how-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  .how-step {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.1rem 1.25rem;
+    position: relative;
+  }
+  .step-num {
+    font-family: var(--mono);
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--border2);
+    line-height: 1;
+    margin-bottom: 8px;
+  }
+  .step-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+  .step-desc  { font-size: 12px; color: var(--text2); line-height: 1.6; }
+
+  /* ── SCENARIO HIGHLIGHT ── */
+  .scenario-box {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+  .scenario-header {
+    padding: 0.75rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .scenario-body { padding: 1.25rem; }
+  .scenario-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  @media (max-width: 600px) { .scenario-row { grid-template-columns: 1fr; } }
+
+  /* ── OVERLAY WITH TIMER ── */
+  .ov2 {
+    display: inline-flex; flex-direction: column; align-items: center;
+    background: #000; border: 1px solid #222; border-radius: 5px;
+    padding: 2px 10px 4px; font-family: var(--mono); font-weight: 700; line-height: 1.2;
+    min-width: 74px;
+  }
+  .ov2-t { font-size: 11px; }
+  .ov2-c { font-size: 17px; display: flex; gap: 5px; }
+
+  .shortcut { flex: 1 1 250px; }
+  .shortcut-desc { flex: 1; min-width: 0; }
+
+  /* ── MODULE HEADERS ── */
+  .module-head {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    margin: 3.5rem 0 1.25rem; padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border2);
+  }
+  .module-num {
+    font-family: var(--mono); font-size: 12px; font-weight: 600;
+    color: var(--bg); background: var(--green); border-radius: 4px; padding: 3px 10px;
+  }
+  .module-title { font-size: 1.15rem; font-weight: 600; color: var(--text); }
+
+  @media (max-width: 600px) {
+    .header { padding: 1.75rem 1rem 1.5rem; }
+    .main { padding: 2rem 1rem 3rem; }
+    .footer { padding: 1.25rem 1rem; }
+    h1 { font-size: 1.5rem; }
+  }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-top">
+    <div>
+      <div class="header-badge"><span class="dot"></span> Process improvement proposal</div>
+      <h1>BPH Counter Overlay <span>— Billing Productivity Toolkit</span></h1>
+      <p class="header-meta">A lightweight on-screen toolkit that helps billers track their pace in real time, spot slow bills early, and enter reference numbers faster and with fewer errors.</p>
+      <p class="header-meta" style="margin-top:6px; color:var(--text3); font-size:13px;">Prepared by <strong style="color:var(--text)">Miguel Alejandro Guerra Sifuentes</strong> &nbsp;·&nbsp; Biller &nbsp;·&nbsp; 2pm–11pm &nbsp;·&nbsp; Central Transport México</p>
+    </div>
+  </div>
+  <div class="header-stats">
+    <div class="hstat">
+      <div class="hstat-label">Shift hours</div>
+      <div class="hstat-val g">2pm – 11pm</div>
+    </div>
+    <div class="hstat">
+      <div class="hstat-label">Effective time</div>
+      <div class="hstat-val y">7.5 hrs</div>
+    </div>
+    <div class="hstat">
+      <div class="hstat-label">Hourly goal</div>
+      <div class="hstat-val g">32 bills/hr</div>
+    </div>
+    <div class="hstat">
+      <div class="hstat-label">Tools in one</div>
+      <div class="hstat-val p">4 modules</div>
+    </div>
+    <div class="hstat">
+      <div class="hstat-label">Install required</div>
+      <div class="hstat-val g">None</div>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+
+  <!-- WHY -->
+  <div class="section-head" style="margin-top:1rem">
+    <span class="section-num">Why</span>
+    <span class="section-title">The challenge this toolkit solves</span>
+  </div>
+  <div class="info-box" style="border-left-color: var(--orange);">
+    Billers work against an hourly goal of <strong>32 bills</strong>, with reduced goals during break hours. The day-to-day work, however, offers <strong>no live view of that goal</strong>, and several routine steps are repetitive and done by hand. Small delays add up over a 9-hour shift and usually become visible only when the shift is over.
+  </div>
+  <div class="cards">
+    <div class="card c-red">
+      <div class="badge badge-red">Pace</div>
+      <div class="card-title">No real-time view of the goal</div>
+      <div class="card-desc">Without a live counter, a biller has to estimate how many bills were done this hour. A slow hour is usually noticed too late to recover it.</div>
+    </div>
+    <div class="card c-yellow">
+      <div class="badge badge-yellow">Time</div>
+      <div class="card-title">Bills that silently take too long</div>
+      <div class="card-desc">Trouble bills, missing data or a slow screen can keep a biller on one bill for many minutes without realizing how much time has passed.</div>
+    </div>
+    <div class="card c-orange">
+      <div class="badge badge-orange">Data entry</div>
+      <div class="card-title">Repetitive copy &amp; paste</div>
+      <div class="card-desc">One bill can carry many PO or reference numbers. Copying and pasting them one at a time is slow, and it is easy to skip one or enter the same number twice.</div>
+    </div>
+    <div class="card c-purple">
+      <div class="badge badge-purple">Conversions</div>
+      <div class="card-title">Manual kg → lbs math</div>
+      <div class="card-desc">Weights that arrive in kilograms must be entered in pounds, which means opening a calculator every time and the risk of a rounding mistake.</div>
+    </div>
+  </div>
+
+  <div class="info-box" style="border-left-color: var(--green); margin-top:1.25rem;">
+    <strong>The solution:</strong> one small PowerShell script, started with a single double-click, that sits quietly in the corner of the screen and handles all four points: a <span class="hl-g">live bill counter</span>, a <span class="hl-y">per-bill timer</span>, a <span class="hl-p">PO/BOL paste queue</span> and a <span class="hl-g">kg → lbs converter</span>. It does not change the TMS, needs no installation, and works within the current IT restrictions.
+  </div>
+
+  <!-- AT A GLANCE -->
+  <div class="section-head">
+    <span class="section-num">Overview</span>
+    <span class="section-title">The toolkit at a glance</span>
+  </div>
+  <div class="how-grid">
+    <div class="how-step">
+      <div class="step-num">01</div>
+      <div class="step-title">Live bill counter</div>
+      <div class="step-desc">Shows bills done this hour and the running buffer against the goal. Colors change from red to purple as the hour improves.</div>
+    </div>
+    <div class="how-step">
+      <div class="step-num">02</div>
+      <div class="step-title">Bill timer</div>
+      <div class="step-desc">A small clock above the counter shows how long the current bill has taken. It restarts with every bill and warns <strong style="color:var(--red)">SAVE NOW</strong> at 14 minutes.</div>
+    </div>
+    <div class="how-step">
+      <div class="step-num">03</div>
+      <div class="step-title">PO/BOL paste queue</div>
+      <div class="step-desc">Paste a whole list of numbers once; each Ctrl+V in the TMS then pastes the next one in order, with duplicates removed automatically.</div>
+    </div>
+    <div class="how-step">
+      <div class="step-num">04</div>
+      <div class="step-title">kg → lbs converter</div>
+      <div class="step-desc">A tiny "KG" box on screen: click, type the kilograms, press Enter and the pounds appear instantly.</div>
+    </div>
+    <div class="how-step">
+      <div class="step-num">05</div>
+      <div class="step-title">End-of-shift report</div>
+      <div class="step-desc">Press F11 for a full summary: average per hour, total bills, buffer, best hour and an hour-by-hour breakdown.</div>
+    </div>
+  </div>
+
+  <!-- OVERLAY PREVIEW -->
+  <div style="margin: 2.5rem 0;">
+    <div class="section-head">
+      <span class="section-num">Preview</span>
+      <span class="section-title">What the biller sees on screen</span>
+    </div>
+    <div style="background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:1.5rem 1.75rem;">
+      <p style="font-size:13px; color:var(--text2); margin-bottom:1.25rem; line-height:1.7;">
+        A small, semi-transparent box sits in the top-right corner of the screen. The top line is the <strong style="color:var(--text)">bill timer</strong>; below it are the <strong style="color:var(--text)">bills done this hour</strong> and the <strong style="color:var(--text)">accumulated buffer</strong>. Next to it is the small <strong style="color:var(--text)">KG</strong> box. Nothing blocks the work area, and none of these windows appear in Alt+Tab or the taskbar.
+      </p>
+      <div style="display:flex; align-items:flex-start; gap:2rem; flex-wrap:wrap;">
+
+        <div style="flex:1; min-width:260px; background:#1a1a1a; border:1px solid #2a2a2a; border-radius:10px; padding:1rem; position:relative; min-height:170px;">
+          <div style="font-size:10px; color:#444; font-family:var(--mono); margin-bottom:8px; text-transform:uppercase; letter-spacing:0.08em;">Your screen</div>
+          <div style="position:absolute; top:16px; right:118px; font-family:Arial,sans-serif; font-size:9px; font-weight:700; color:#1AE87A; background:#2d2d2d; border:1px solid #1AE87A; padding:1px 4px;">KG</div>
+          <div class="ov2" style="position:absolute; top:12px; right:14px;">
+            <div class="ov2-t" style="color:#FFD43B;">03:12</div>
+            <div class="ov2-c"><span class="og">34</span><span class="sep">|</span><span class="oy">+6</span></div>
+          </div>
+          <div style="position:absolute; bottom:18px; left:50%; transform:translateX(-50%); font-size:11px; color:#444; font-family:var(--mono); white-space:nowrap;">↑ always on top, never in the way</div>
+        </div>
+
+        <div style="flex:1; min-width:220px; display:flex; flex-direction:column; gap:10px;">
+          <div style="font-size:11px; color:var(--text3); font-family:var(--mono); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:2px;">How to read it</div>
+          <div style="display:flex; align-items:center; gap:12px;">
+            <div class="ov2"><div class="ov2-t" style="color:#1AE87A;">00:48</div><div class="ov2-c"><span class="or">8</span><span class="sep">|</span><span class="or">-3</span></div></div>
+            <span style="font-size:12px; color:var(--text2);">Early in the hour, behind on buffer</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:12px;">
+            <div class="ov2"><div class="ov2-t" style="color:#FFD43B;">03:12</div><div class="ov2-c"><span class="og">34</span><span class="sep">|</span><span class="oy">+6</span></div></div>
+            <span style="font-size:12px; color:var(--text2);">Goal met this hour, small lead</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:12px;">
+            <div class="ov2"><div class="ov2-t" style="color:#FF4D4D;">11:30</div><div class="ov2-c"><span class="op">37</span><span class="sep">|</span><span class="og">+11</span></div></div>
+            <span style="font-size:12px; color:var(--text2);">Strong hour, but this bill is taking long</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:12px;">
+            <div class="ov2"><div class="ov2-t" style="color:#FF4D4D;">SAVE NOW</div><div class="ov2-c"><span class="oy">20</span><span class="sep">|</span><span class="or">-5</span></div></div>
+            <span style="font-size:12px; color:var(--text2);">14 minutes on one bill: save it and move on</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODULE 1 -->
+  <div class="module-head">
+    <span class="module-num">Module 1</span>
+    <span class="module-title">Live bill counter, buffer &amp; shift report</span>
+  </div>
+
+
+  <!-- WHAT IT IS -->
+  <div class="section-head">
+    <span class="section-num">Counter</span>
+    <span class="section-title">How the counter works</span>
+  </div>
+  <div class="how-grid">
+    <div class="how-step">
+      <div class="step-num">01</div>
+      <div class="step-title">Runs in the background</div>
+      <div class="step-desc">A small transparent overlay sits in the top-right corner of the screen. It never blocks work and requires no window switching.</div>
+    </div>
+    <div class="how-step">
+      <div class="step-num">02</div>
+      <div class="step-title">Counts bills in real time</div>
+      <div class="step-desc">Every time a bill is processed, the employee presses <strong style="color:var(--text)">Alt + S</strong>. The counter goes up instantly on screen.</div>
+    </div>
+    <div class="how-step">
+      <div class="step-num">03</div>
+      <div class="step-title">Tracks against hourly goal</div>
+      <div class="step-desc">Each hour has a target. The color of the overlay tells the employee at a glance whether they are on track or falling behind.</div>
+    </div>
+    <div class="how-step">
+      <div class="step-num">04</div>
+      <div class="step-title">Generates a shift report</div>
+      <div class="step-desc">At any point, pressing <strong style="color:var(--text)">F11</strong> shows a complete summary: average rate, total bills, buffer, best hour, and breakdown. After viewing, press <strong style="color:var(--text)">F11</strong> again or click the report to close it — the overlay resets to zero and keeps running for the next shift.</div>
+    </div>
+    <div class="how-step">
+      <div class="step-num">05</div>
+      <div class="step-title">Remembers your progress</div>
+      <div class="step-desc">If the app is closed and reopened during the same day, all counts and the accumulated buffer are fully restored.</div>
+    </div>
+    <div class="how-step">
+      <div class="step-num">06</div>
+      <div class="step-title">Handles shift exceptions</div>
+      <div class="step-desc">Break hours (4pm, 6pm) have a reduced goal of 24. The 7pm lunch hour is completely excluded — it neither adds nor removes from the score.</div>
+    </div>
+    <div class="how-step">
+      <div class="step-num">07</div>
+      <div class="step-title">Smart overtime detection</div>
+      <div class="step-desc">Hours worked outside the official shift are tracked as <strong style="color:var(--orange)">OT</strong>. If you open the tool early but don't register any bills, that hour is silently discarded. If you do work, it counts fully — affecting AVG, buffer, and appearing tagged in the report.</div>
+    </div>
+    <div class="how-step">
+      <div class="step-num">08</div>
+      <div class="step-title">Auto-reset at 4am</div>
+      <div class="step-desc">If the tool is left open overnight — PC in sleep mode, forgot to press F11 — the counter resets automatically at 4am, so the next shift always starts clean with no leftover data.</div>
+    </div>
+  </div>
+
+  <!-- SHIFT STRUCTURE -->
+  <div class="section-head">
+    <span class="section-num">Shift time</span>
+    <span class="section-title">How the 9-hour shift is counted</span>
+  </div>
+  <div class="info-box">
+    <strong>Total calendar time: 9 hours</strong> (2pm to 11pm)<br>
+    <strong>Effective productive time: <span class="hl-y">7.5 hours</span></strong> — the two break hours (4pm and 6pm) each contribute only 45 active minutes instead of 60, removing 2 × 15 = 30 minutes from the total.<br>
+    The 7pm lunch hour contributes <strong>0 minutes</strong> — anything done there is not counted.<br><br>
+    <span class="hl-g">Theoretical max at 32/hr → 7.5 × 32 = 240 bills</span> &nbsp;|&nbsp;
+    <span class="hl-p">At 35/hr → 7.5 × 35 = 262 bills</span>
+  </div>
+
+  <!-- SECTION 1: OVERLAY COLORS -->
+  <div class="section-head">
+    <span class="section-num">Section 1</span>
+    <span class="section-title">The overlay — what the colors mean</span>
+  </div>
+
+  <div class="info-box" style="border-left-color: var(--text3); margin-bottom: 1rem;">
+    The overlay shows two numbers separated by a bar: <strong>current hour count</strong> and <strong>accumulated buffer</strong>. Both change color based on performance.
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div> Red — below 50% of goal</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--yellow)"></div> Yellow — 50–99% of goal</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div> Green — goal met (≥100%)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--purple)"></div> Purple — exceptional (≥35 bills)</div>
+  </div>
+
+  <div class="cards">
+    <div class="card c-red">
+      <div class="badge badge-red">● Red &lt;50%</div>
+      <div class="card-title">Below half the goal</div>
+      <div class="card-desc">2:10 pm — 8 out of 32 bills (25%). Buffer unchanged. Needs to pick up the pace significantly.</div>
+      <div class="overlay-wrap">
+        <div class="overlay-label">Overlay display</div>
+        <div class="overlay-mock"><span class="or">8</span><span class="sep">|</span><span class="or">+0</span></div>
+      </div>
+    </div>
+    <div class="card c-yellow">
+      <div class="badge badge-yellow">◑ Yellow 50–99%</div>
+      <div class="card-title">On the way but not there yet</div>
+      <div class="card-desc">3:40 pm — 20 out of 32 bills (62.5%). Buffer from previous hours: −5. Still needs to push to close the gap.</div>
+      <div class="overlay-wrap">
+        <div class="overlay-label">Overlay display</div>
+        <div class="overlay-mock"><span class="oy">20</span><span class="sep">|</span><span class="or">-5</span></div>
+      </div>
+    </div>
+    <div class="card c-green">
+      <div class="badge badge-green">✓ Green ≥100%</div>
+      <div class="card-title">Goal met</div>
+      <div class="card-desc">3:55 pm — 34 out of 32 bills. Buffer from previous hours: +2. When the hour closes, 34 − 32 = +2 more goes to the buffer (+4). A solid hour.</div>
+      <div class="overlay-wrap">
+        <div class="overlay-label">Overlay display</div>
+        <div class="overlay-mock"><span class="og">34</span><span class="sep">|</span><span class="oy">+2</span></div>
+      </div>
+    </div>
+    <div class="card c-purple">
+      <div class="badge badge-purple">★ Purple ≥35</div>
+      <div class="card-title">Exceptional hour</div>
+      <div class="card-desc">3:58 pm — 37 bills. Passed the 35-bill threshold. Buffer from previous hours: +9. When the hour closes, 37 − 32 = +5 goes to the buffer (+14). No extra bonus — purple only marks the hour as exceptional.</div>
+      <div class="overlay-wrap">
+        <div class="overlay-label">Overlay display</div>
+        <div class="overlay-mock"><span class="op">37</span><span class="sep">|</span><span class="og">+9</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 2: BREAK HOURS -->
+  <div class="section-head">
+    <span class="section-num">Section 2</span>
+    <span class="section-title">Break hours (4pm and 6pm) — 45 active minutes, goal is 24</span>
+  </div>
+  <div class="info-box" style="border-left-color: var(--yellow);">
+    These two hours have a <strong>reduced goal of 24 bills</strong> instead of 32, reflecting the shorter 45-minute working window. The purple threshold is also reduced to <strong>28 bills</strong>. The 15 remaining minutes are not counted in any calculation.
+  </div>
+  <div class="cards-3">
+    <div class="card c-green">
+      <div class="badge badge-green">✓ Break OK</div>
+      <div class="card-title">Break goal met</div>
+      <div class="card-desc">4pm break — 26 bills in 45 min. Goal of 24 exceeded. Buffer from previous hours: +2; when the hour closes, +2 more is added (+4). Good performance under reduced time.</div>
+      <div class="overlay-wrap">
+        <div class="overlay-label">Overlay display</div>
+        <div class="overlay-mock"><span class="og">26</span><span class="sep">|</span><span class="oy">+2</span></div>
+      </div>
+    </div>
+    <div class="card c-red">
+      <div class="badge badge-red">✗ Break low</div>
+      <div class="card-title">Below break goal</div>
+      <div class="card-desc">6pm break — 18 bills. 6 short of the 24 goal. Buffer from previous hours: −6; when the hour closes, −6 more is subtracted (−12). Even breaks count against the total.</div>
+      <div class="overlay-wrap">
+        <div class="overlay-label">Overlay display</div>
+        <div class="overlay-mock"><span class="oy">18</span><span class="sep">|</span><span class="or">-6</span></div>
+      </div>
+    </div>
+    <div class="card c-purple">
+      <div class="badge badge-purple">★ Purple break ≥28</div>
+      <div class="card-title">Exceptional break</div>
+      <div class="card-desc">6pm break — 30 bills in 45 min. Passed the 28-bill threshold. Buffer from previous hours: +6; when the hour closes, 30 − 24 = +6 more (+12). Outstanding productivity in limited time.</div>
+      <div class="overlay-wrap">
+        <div class="overlay-label">Overlay display</div>
+        <div class="overlay-mock"><span class="op">30</span><span class="sep">|</span><span class="oy">+6</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 3: LUNCH -->
+  <div class="section-head">
+    <span class="section-num">Section 3</span>
+    <span class="section-title">Lunch hour (7pm) — completely neutral</span>
+  </div>
+  <div class="info-box" style="border-left-color: var(--gray);">
+    Whatever happens at 7pm <strong>does not affect the buffer or the average</strong>. It is treated as 0 active minutes. The tool records any count shown but excludes it entirely from all final calculations.
+  </div>
+  <div class="cards-3">
+    <div class="card c-gray">
+      <div class="badge badge-gray">— Lunch</div>
+      <div class="card-title">Zero impact on score</div>
+      <div class="card-desc">7pm — any bills counted here are ignored. The buffer shown is whatever it was going into this hour. It remains exactly the same when the 8pm hour begins.</div>
+      <div class="overlay-wrap">
+        <div class="overlay-label">Overlay display — buffer stays frozen</div>
+        <div class="overlay-mock"><span class="or">15</span><span class="sep">|</span><span class="og">+8</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 3B: OVERTIME -->
+  <div class="section-head">
+    <span class="section-num">Section 3B</span>
+    <span class="section-title">Overtime hours — outside the official shift</span>
+  </div>
+  <div class="info-box" style="border-left-color: var(--orange);">
+    Any hour worked <strong>before 2pm or after 11pm</strong> is treated as overtime. The tool detects it automatically — no setup required. <strong>If you open the program early and register nothing, that hour is discarded silently.</strong> If you register at least 1 bill, the hour counts fully: same goal of 32, same color thresholds, affects buffer and AVG just like any other hour. The report marks it with <strong style="color:var(--orange)">OT</strong> so you can distinguish it from your regular shift.
+  </div>
+  <div class="cards-3">
+    <div class="card c-orange">
+      <div class="badge badge-orange">OT — Open early, no work</div>
+      <div class="card-title">Opened at 1:55pm, zero bills registered</div>
+      <div class="card-desc">The 1pm hour closes with count=0 when 2pm arrives. It is discarded silently — no penalty, no entry in the report. The shift starts clean at 2pm.</div>
+      <div class="overlay-wrap">
+        <div class="overlay-label">1pm hour — discarded, shift starts clean</div>
+        <div class="overlay-mock"><span class="or">0</span><span class="sep">|</span><span class="or">+0</span></div>
+      </div>
+    </div>
+    <div class="card c-orange">
+      <div class="badge badge-orange">OT — Arrived 1hr early with work</div>
+      <div class="card-title">Started at 1pm, registered 28 bills</div>
+      <div class="card-desc">1pm OT hour with 28 bills (Δ −4). Counts fully — affects buffer and AVG. Appears in report breakdown as <strong style="color:var(--orange)">28 OT</strong>.</div>
+      <div class="overlay-wrap">
+        <div class="overlay-label">Overlay during 1pm OT hour</div>
+        <div class="overlay-mock"><span class="oy">28</span><span class="sep">|</span><span class="or">-4</span></div>
+      </div>
+    </div>
+    <div class="card c-orange">
+      <div class="badge badge-orange">OT — Stayed late after 11pm</div>
+      <div class="card-title">Worked until 1am — crosses midnight</div>
+      <div class="card-desc">11pm and 12am are both OT. The program survives midnight without losing data. Press F11 before 4am to get the full report including the OT hours.</div>
+      <div class="overlay-wrap">
+        <div class="overlay-label">Overlay at 12am — still tracking</div>
+        <div class="overlay-mock"><span class="oy">28</span><span class="sep">|</span><span class="or">-3</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 4: BUFFER -->
+  <div class="section-head">
+    <span class="section-num">Section 4</span>
+    <span class="section-title">Accumulated buffer — the running score for the day</span>
+  </div>
+  <div class="info-box" style="border-left-color: var(--purple);">
+    The <strong>buffer</strong> is the running total of how many bills you are ahead of or behind the cumulative goal across all productive hours. It is updated automatically at the end of every hour. A <strong>positive buffer</strong> means you have done more than required; a <strong>negative buffer</strong> means you have a deficit to recover.
+  </div>
+  <div class="cards">
+    <div class="card c-purple">
+      <div class="badge badge-purple">★ Excellent ≥+16</div>
+      <div class="card-title">Multiple exceptional hours</div>
+      <div class="card-desc">7.5 productive hours, average ~34.5/hr. Several purple hours boost the buffer significantly. End-of-shift buffer: +19.</div>
+      <div class="overlay-mock" style="margin-top:6px"><span class="op">38</span><span class="sep">|</span><span class="op">+19</span></div>
+    </div>
+    <div class="card c-green">
+      <div class="badge badge-green">✓ Good +8 to +15</div>
+      <div class="card-title">Consistent day, no peaks</div>
+      <div class="card-desc">Average ~33.5/hr. Steady performance across all hours. End-of-shift buffer: +11.</div>
+      <div class="overlay-mock" style="margin-top:6px"><span class="og">33</span><span class="sep">|</span><span class="og">+11</span></div>
+    </div>
+    <div class="card c-yellow">
+      <div class="badge badge-yellow">◑ Slight +1 to +7</div>
+      <div class="card-title">A few slow hours</div>
+      <div class="card-desc">Average ~32.7/hr. Just above the goal overall, but some hours dragged. End-of-shift buffer: +5.</div>
+      <div class="overlay-mock" style="margin-top:6px"><span class="og">32</span><span class="sep">|</span><span class="oy">+5</span></div>
+    </div>
+    <div class="card c-red">
+      <div class="badge badge-red">✗ Negative</div>
+      <div class="card-title">Deficit accumulated</div>
+      <div class="card-desc">Several red hours. Average ~30.5/hr. Multiple hours below goal. End-of-shift buffer: -11.</div>
+      <div class="overlay-mock" style="margin-top:6px"><span class="oy">28</span><span class="sep">|</span><span class="or">-11</span></div>
+    </div>
+  </div>
+
+  <!-- SECTION 5: REPORTS -->
+  <div class="section-head">
+    <span class="section-num">Section 5</span>
+    <span class="section-title">End-of-shift report (F11) — all possible scenarios</span>
+  </div>
+  <div class="info-box" style="border-left-color: var(--purple);">
+    Pressing <strong>F11</strong> at any point generates the report. It automatically detects what fraction of the current hour is complete, applies the appropriate time weight, and calculates the final average and buffer. <strong>The overlay keeps running</strong> while you view the report. Closing the report — by clicking it or pressing <strong>F11</strong> again — resets everything to zero so the next shift starts clean.
+  </div>
+
+  <div class="cards-2" style="margin-bottom:12px">
+    <!-- SCENARIO A -->
+    <div class="card c-green">
+      <div class="badge badge-green">✓ Scenario A — Full shift, on track</div>
+      <div class="card-title">F11 pressed at 10:57 pm — 7.5 hrs complete, goal met</div>
+      <div class="card-desc">247 bills across 450 active minutes = 32.93/hr. Buffer: 247 − (7.5 × 32) = +7.</div>
+      <div class="report-wrap">
+        <span class="rw">BPH STATS</span><br>
+        <span class="rd">───────────────</span><br>
+        <span class="rg">[OK] ON TRACK</span><br>
+        <span class="rg">AVG: 32.93/hr</span><br>
+        <span class="rw">TOTAL: 247 bills</span><br>
+        <span class="rw">TIME: 7.5hr</span><br>
+        <span class="rd">────────────────────</span><br>
+        <span class="rg">[+] BUFFER: +7</span><br>
+        <span class="rd">────────────────────</span><br>
+        <span class="rp">BEST: 8pm → 42 bills</span><br>
+        <span class="ry">CONSISTENCY: 78%</span><br>
+        <span class="rd">────────────────────</span><br>
+        <span class="rw">BREAKDOWN</span><br>
+        <span class="rp">&nbsp;&nbsp;2pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;35</span><br>
+        <span class="ry">&nbsp;&nbsp;3pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;28</span><br>
+        <span class="rg">&nbsp;&nbsp;4pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;26 BREAK</span><br>
+        <span class="rg">&nbsp;&nbsp;5pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;33</span><br>
+        <span class="ry">&nbsp;&nbsp;6pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;20 BREAK</span><br>
+        <span class="rp">&nbsp;&nbsp;8pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;42</span><br>
+        <span class="rg">&nbsp;&nbsp;9pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;34</span><br>
+        <span class="ry">&nbsp;&nbsp;10pm&nbsp;&nbsp;&nbsp;&nbsp;29</span>
+      </div>
+    </div>
+    <!-- SCENARIO B -->
+    <div class="card c-red">
+      <div class="badge badge-red">✗ Scenario B — Full shift, below goal</div>
+      <div class="card-title">F11 pressed at 10:58 pm — 7.5 hrs complete, below goal</div>
+      <div class="card-desc">208 bills across 450 active minutes = 27.73/hr. Buffer: 208 − 240 = −32.</div>
+      <div class="report-wrap">
+        <span class="rw">BPH STATS</span><br>
+        <span class="rd">───────────────</span><br>
+        <span class="rr">[!!] BELOW GOAL</span><br>
+        <span class="rr">AVG: 27.73/hr</span><br>
+        <span class="rw">TOTAL: 208 bills</span><br>
+        <span class="rw">TIME: 7.5hr</span><br>
+        <span class="rd">────────────────────</span><br>
+        <span class="rr">[-] MISSING: 32</span><br>
+        <span class="rd">────────────────────</span><br>
+        <span class="rp">BEST: 8pm → 38 bills</span><br>
+        <span class="ry">CONSISTENCY: 73%</span><br>
+        <span class="rd">────────────────────</span><br>
+        <span class="rw">BREAKDOWN</span><br>
+        <span class="ry">&nbsp;&nbsp;2pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;22</span><br>
+        <span class="ry">&nbsp;&nbsp;3pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;25</span><br>
+        <span class="ry">&nbsp;&nbsp;4pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;20 BREAK</span><br>
+        <span class="ry">&nbsp;&nbsp;5pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;28</span><br>
+        <span class="ry">&nbsp;&nbsp;6pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;18 BREAK</span><br>
+        <span class="rp">&nbsp;&nbsp;8pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;38</span><br>
+        <span class="ry">&nbsp;&nbsp;9pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;30</span><br>
+        <span class="ry">&nbsp;&nbsp;10pm&nbsp;&nbsp;&nbsp;&nbsp;27</span>
+      </div>
+    </div>
+  </div>
+  <div class="cards-2">
+    <!-- SCENARIO C -->
+    <div class="card c-yellow">
+      <div class="badge badge-yellow">Scenario C — Half-hour penalty</div>
+      <div class="card-title">F11 pressed at 8:30 pm — 4.5 hrs worked + half-hour penalty</div>
+      <div class="card-desc">Pressing F11 between :23 and :37 turns the current hour into a penalized half hour: the 16 bills made in it are stripped out (not in the total, not in the breakdown), but its 30 minutes still count as time. Worked time = 60+60+45+60+45 = 270 min, plus 30 penalized = 300 min (5hr). MISSING = 152 − (5 × 32) = 8.</div>
+      <div class="report-wrap">
+        <span class="rw">BPH STATS</span><br>
+        <span class="rd">───────────────</span><br>
+        <span class="rr">[!!] BELOW GOAL</span><br>
+        <span class="rr">AVG: 30.4/hr</span><br>
+        <span class="rw">TOTAL: 152 bills</span><br>
+        <span class="rw">TIME: 5hr</span><br>
+        <span class="rd">────────────────────</span><br>
+        <span class="rr">[-] MISSING: 8</span><br>
+        <span class="ro">[!] PENALTY: -16 (Half hour)</span><br>
+        <span class="rd">────────────────────</span><br>
+        <span class="rp">BEST: 2pm → 35 bills</span><br>
+        <span class="ry">CONSISTENCY: 87%</span><br>
+        <span class="rd">────────────────────</span><br>
+        <span class="rw">BREAKDOWN</span><br>
+        <span class="rp">&nbsp;&nbsp;2pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;35</span><br>
+        <span class="ry">&nbsp;&nbsp;3pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;28</span><br>
+        <span class="rg">&nbsp;&nbsp;4pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;26 BREAK</span><br>
+        <span class="rg">&nbsp;&nbsp;5pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;33</span><br>
+        <span class="rp">&nbsp;&nbsp;6pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;30 BREAK</span>
+      </div>
+    </div>
+    <!-- SCENARIO D -->
+    <div class="card c-purple">
+      <div class="badge badge-purple">★ Scenario D — Purple shift</div>
+      <div class="card-title">F11 pressed at 10:57 pm — exceptional across the board</div>
+      <div class="card-desc">Every hour green or purple. Full shift of 7.5 hrs: 285 − 240 = +45 buffer. The status line still reads ON TRACK — purple is shown through the colors, not a separate status.</div>
+      <div class="report-wrap">
+        <span class="rw">BPH STATS</span><br>
+        <span class="rd">───────────────</span><br>
+        <span class="rg">[OK] ON TRACK</span><br>
+        <span class="rg">AVG: 38.0/hr</span><br>
+        <span class="rw">TOTAL: 285 bills</span><br>
+        <span class="rw">TIME: 7.5hr</span><br>
+        <span class="rd">────────────────────</span><br>
+        <span class="rg">[+] BUFFER: +45</span><br>
+        <span class="rd">────────────────────</span><br>
+        <span class="rp">BEST: 8pm → 44 bills</span><br>
+        <span class="ry">CONSISTENCY: 86%</span><br>
+        <span class="rd">────────────────────</span><br>
+        <span class="rw">BREAKDOWN</span><br>
+        <span class="rp">&nbsp;&nbsp;2pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;38</span><br>
+        <span class="rp">&nbsp;&nbsp;3pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;35</span><br>
+        <span class="rp">&nbsp;&nbsp;4pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;28 BREAK</span><br>
+        <span class="rp">&nbsp;&nbsp;5pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;36</span><br>
+        <span class="rp">&nbsp;&nbsp;6pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;30 BREAK</span><br>
+        <span class="rp">&nbsp;&nbsp;8pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;44</span><br>
+        <span class="rp">&nbsp;&nbsp;9pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;38</span><br>
+        <span class="rp">&nbsp;&nbsp;10pm&nbsp;&nbsp;&nbsp;&nbsp;36</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCENARIO E: OT -->
+  <div class="cards-2" style="margin-top:12px">
+    <div class="card c-orange">
+      <div class="badge badge-orange">Scenario E — Shift with OT before</div>
+      <div class="card-title">Worked 1pm–11pm — 1hr OT before official shift</div>
+      <div class="card-desc">1pm OT hour with 28 bills counts fully. Official shift runs normal. Total = 7.5 hrs + 1hr OT = 8.5 active hrs. 275 − (8.5 × 32) = +3. The OT hour appears tagged in the breakdown.</div>
+      <div class="report-wrap">
+        <span class="rw">BPH STATS</span><br>
+        <span class="rd">───────────────</span><br>
+        <span class="rg">[OK] ON TRACK</span><br>
+        <span class="rg">AVG: 32.35/hr</span><br>
+        <span class="rw">TOTAL: 275 bills</span><br>
+        <span class="rw">TIME: 8.5hr</span><br>
+        <span class="rd">────────────────────</span><br>
+        <span class="rg">[+] BUFFER: +3</span><br>
+        <span class="rd">────────────────────</span><br>
+        <span class="rp">BEST: 8pm → 42 bills</span><br>
+        <span class="ry">CONSISTENCY: 77%</span><br>
+        <span class="rd">────────────────────</span><br>
+        <span class="rw">BREAKDOWN</span><br>
+        <span class="ry">&nbsp;&nbsp;1pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;28 OT</span><br>
+        <span class="rp">&nbsp;&nbsp;2pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;35</span><br>
+        <span class="ry">&nbsp;&nbsp;3pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;28</span><br>
+        <span class="rg">&nbsp;&nbsp;4pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;26 BREAK</span><br>
+        <span class="rg">&nbsp;&nbsp;5pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;33</span><br>
+        <span class="ry">&nbsp;&nbsp;6pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;20 BREAK</span><br>
+        <span class="rp">&nbsp;&nbsp;8pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;42</span><br>
+        <span class="rg">&nbsp;&nbsp;9pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;34</span><br>
+        <span class="ry">&nbsp;&nbsp;10pm&nbsp;&nbsp;&nbsp;&nbsp;29</span>
+      </div>
+    </div>
+    <div class="card c-orange">
+      <div class="badge badge-orange">Scenario F — Shift with OT after, crosses midnight</div>
+      <div class="card-title">Worked 2pm–1am — 2hr OT after official shift</div>
+      <div class="card-desc">Official shift ends at 11pm. Stayed until 1am with 30 and 28 bills (F11 at 12:58am). Both OT hours count fully: 7.5 + 2 = 9.5 active hrs. 305 − (9.5 × 32) = +1. 4am auto-reset will clear the data if F11 is not pressed before then.</div>
+      <div class="report-wrap">
+        <span class="rw">BPH STATS</span><br>
+        <span class="rd">───────────────</span><br>
+        <span class="rg">[OK] ON TRACK</span><br>
+        <span class="rg">AVG: 32.11/hr</span><br>
+        <span class="rw">TOTAL: 305 bills</span><br>
+        <span class="rw">TIME: 9.5hr</span><br>
+        <span class="rd">────────────────────</span><br>
+        <span class="rg">[+] BUFFER: +1</span><br>
+        <span class="rd">────────────────────</span><br>
+        <span class="rp">BEST: 8pm → 42 bills</span><br>
+        <span class="ry">CONSISTENCY: 76%</span><br>
+        <span class="rd">────────────────────</span><br>
+        <span class="rw">BREAKDOWN</span><br>
+        <span class="rp">&nbsp;&nbsp;2pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;35</span><br>
+        <span class="ry">&nbsp;&nbsp;3pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;28</span><br>
+        <span class="rg">&nbsp;&nbsp;4pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;26 BREAK</span><br>
+        <span class="rg">&nbsp;&nbsp;5pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;33</span><br>
+        <span class="ry">&nbsp;&nbsp;6pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;20 BREAK</span><br>
+        <span class="rp">&nbsp;&nbsp;8pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;42</span><br>
+        <span class="rg">&nbsp;&nbsp;9pm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;34</span><br>
+        <span class="ry">&nbsp;&nbsp;10pm&nbsp;&nbsp;&nbsp;&nbsp;29</span><br>
+        <span class="ry">&nbsp;&nbsp;11pm&nbsp;&nbsp;&nbsp;&nbsp;30 OT</span><br>
+        <span class="ry">&nbsp;&nbsp;12am&nbsp;&nbsp;&nbsp;&nbsp;28 OT</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 6: BREAKDOWN -->
+  <div class="section-head">
+    <span class="section-num">Section 6</span>
+    <span class="section-title">Hour-by-hour breakdown — full shift with OT example</span>
+  </div>
+  <div class="breakdown-card">
+    <table class="bk-table">
+      <thead>
+        <tr>
+          <th>Hour</th>
+          <th>Type</th>
+          <th>Bills</th>
+          <th>Δ Buffer</th>
+          <th>Result</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="color:var(--orange)">1pm (13h)</td>
+          <td style="color:var(--orange);font-size:11px">60 min OT</td>
+          <td style="color:var(--yellow)">28</td>
+          <td style="color:var(--red)">−4</td>
+          <td style="color:var(--text3);font-size:11px">buf: −4</td>
+        </tr>
+        <tr>
+          <td>2pm (14h)</td>
+          <td style="color:var(--text3);font-size:11px">60 min</td>
+          <td style="color:var(--purple)">35</td>
+          <td style="color:var(--green)">+3</td>
+          <td style="color:var(--text3);font-size:11px">buf: −1</td>
+        </tr>
+        <tr>
+          <td>3pm (15h)</td>
+          <td style="color:var(--text3);font-size:11px">60 min</td>
+          <td style="color:var(--yellow)">22</td>
+          <td style="color:var(--red)">−10</td>
+          <td style="color:var(--text3);font-size:11px">buf: −11</td>
+        </tr>
+        <tr>
+          <td>4pm (16h)</td>
+          <td style="color:var(--yellow);font-size:11px">45 min ★ break</td>
+          <td style="color:var(--green)">26</td>
+          <td style="color:var(--green)">+2</td>
+          <td style="color:var(--text3);font-size:11px">buf: −9</td>
+        </tr>
+        <tr>
+          <td>5pm (17h)</td>
+          <td style="color:var(--text3);font-size:11px">60 min</td>
+          <td style="color:var(--green)">33</td>
+          <td style="color:var(--green)">+1</td>
+          <td style="color:var(--text3);font-size:11px">buf: −8</td>
+        </tr>
+        <tr>
+          <td>6pm (18h)</td>
+          <td style="color:var(--yellow);font-size:11px">45 min ★ break</td>
+          <td style="color:var(--purple)">30</td>
+          <td style="color:var(--green)">+6</td>
+          <td style="color:var(--text3);font-size:11px">buf: −2</td>
+        </tr>
+        <tr>
+          <td>7pm (19h)</td>
+          <td style="color:var(--gray);font-size:11px">0 min lunch</td>
+          <td style="color:var(--gray)">12</td>
+          <td style="color:var(--gray)">no change</td>
+          <td style="color:var(--text3);font-size:11px">buf: −2</td>
+        </tr>
+        <tr>
+          <td>8pm (20h)</td>
+          <td style="color:var(--text3);font-size:11px">60 min</td>
+          <td style="color:var(--purple)">42</td>
+          <td style="color:var(--green)">+10</td>
+          <td style="color:var(--text3);font-size:11px">buf: +8</td>
+        </tr>
+        <tr>
+          <td>9pm (21h)</td>
+          <td style="color:var(--text3);font-size:11px">60 min</td>
+          <td style="color:var(--green)">34</td>
+          <td style="color:var(--green)">+2</td>
+          <td style="color:var(--text3);font-size:11px">buf: +10</td>
+        </tr>
+        <tr>
+          <td>10pm (22h)</td>
+          <td style="color:var(--text3);font-size:11px">60 min</td>
+          <td style="color:var(--yellow)">29</td>
+          <td style="color:var(--red)">−3</td>
+          <td style="color:var(--text3);font-size:11px">buf: +7</td>
+        </tr>
+        <tr>
+          <td style="color:var(--orange)">11pm (23h)</td>
+          <td style="color:var(--orange);font-size:11px">60 min OT</td>
+          <td style="color:var(--yellow)">29</td>
+          <td style="color:var(--red)">−3</td>
+          <td style="color:var(--text3);font-size:11px">buf: +4</td>
+        </tr>
+        <tr style="background:var(--bg3)">
+          <td colspan="2" style="color:var(--purple);font-weight:600;padding-top:8px;border-top:1px solid var(--border2)">SHIFT CLOSE →</td>
+          <td style="color:var(--purple);font-weight:600;padding-top:8px;border-top:1px solid var(--border2)">308</td>
+          <td colspan="2" style="color:var(--text2);font-size:11px;padding-top:8px;border-top:1px solid var(--border2)">308 ÷ 9.5hr = 32.42/hr &nbsp;|&nbsp; buffer: +4 ✓ (incl. 2hr OT)</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="note-small">
+      ★ Break hours (4pm, 6pm): 45 min each — the remaining 15 min do not count.<br>
+      OT hours (outside 2pm–11pm): count fully at goal=32 if bills &gt; 0. If count=0, discarded silently.<br>
+      Lunch (7pm): 0 active minutes, buffer frozen, excluded from report entirely.<br>
+      Auto-reset: if the program is left open overnight, it resets automatically at 4am.
+    </div>
+  </div>
+
+
+  <!-- MODULE 2: BILL TIMER -->
+  <div class="module-head">
+    <span class="module-num">Module 2</span>
+    <span class="module-title">Bill timer — how long the current bill is taking</span>
+  </div>
+  <div class="info-box" style="border-left-color: var(--yellow);">
+    A small clock sits right above the counter, inside the same box. It starts at <strong>00:00</strong> and restarts every time a bill is counted with <strong>Alt + S</strong>. Its color changes as minutes pass, so a bill that is taking too long is noticed right away instead of at the end of the hour. At <strong>14 minutes</strong> it switches to a flashing <span style="color:var(--red); font-family:var(--mono);">SAVE NOW</span> as a reminder to save the bill (or escalate it) and move on.
+  </div>
+  <div class="cards">
+    <div class="card c-green">
+      <div class="badge badge-green">0:00 – 1:59</div>
+      <div class="card-title">Green — normal pace</div>
+      <div class="card-desc">At 32 bills per hour, one bill takes under 2 minutes on average.</div>
+      <div class="overlay-wrap"><div class="ov2"><div class="ov2-t" style="color:#1AE87A;">01:24</div><div class="ov2-c"><span class="oy">21</span><span class="sep">|</span><span class="oy">+4</span></div></div></div>
+    </div>
+    <div class="card c-yellow">
+      <div class="badge badge-yellow">2:00 – 4:59</div>
+      <div class="card-title">Yellow — slower than average</div>
+      <div class="card-desc">Still fine for a bill with more references or details.</div>
+      <div class="overlay-wrap"><div class="ov2"><div class="ov2-t" style="color:#FFD43B;">03:40</div><div class="ov2-c"><span class="oy">21</span><span class="sep">|</span><span class="oy">+4</span></div></div></div>
+    </div>
+    <div class="card c-orange">
+      <div class="badge badge-orange">5:00 – 9:59</div>
+      <div class="card-title">Orange — taking long</div>
+      <div class="card-desc">Worth checking whether something is missing or blocking the bill.</div>
+      <div class="overlay-wrap"><div class="ov2"><div class="ov2-t" style="color:#FF9500;">07:05</div><div class="ov2-c"><span class="oy">21</span><span class="sep">|</span><span class="oy">+4</span></div></div></div>
+    </div>
+    <div class="card c-red">
+      <div class="badge badge-red">10:00 – 13:59</div>
+      <div class="card-title">Red — decision time</div>
+      <div class="card-desc">The bill is costing several bills' worth of time. Decide whether to finish, save, or escalate it.</div>
+      <div class="overlay-wrap"><div class="ov2"><div class="ov2-t" style="color:#FF4D4D;">12:18</div><div class="ov2-c"><span class="oy">21</span><span class="sep">|</span><span class="oy">+4</span></div></div></div>
+    </div>
+    <div class="card c-red">
+      <div class="badge badge-red">14:00 +</div>
+      <div class="card-title">SAVE NOW — flashing</div>
+      <div class="card-desc">Maximum time reached. The text flashes red and white until the next bill is counted.</div>
+      <div class="overlay-wrap"><div class="ov2"><div class="ov2-t" style="color:#FF4D4D;">SAVE NOW</div><div class="ov2-c"><span class="oy">21</span><span class="sep">|</span><span class="oy">+4</span></div></div></div>
+    </div>
+  </div>
+  <div class="note-small">
+    The timer restarts only when a bill is actually counted (a repeated Alt+S inside the 10-second lock does not restart it). While the end-of-shift report is open, the timer is hidden; it comes back at 00:00 when the report is closed. The time limits can be adjusted in the configuration section of the script.
+  </div>
+
+  <!-- MODULE 3: PASTE QUEUE -->
+  <div class="module-head">
+    <span class="module-num">Module 3</span>
+    <span class="module-title">PO / BOL paste queue — paste a whole list, one number at a time</span>
+  </div>
+  <div class="info-box" style="border-left-color: var(--purple);">
+    When a bill carries several PO or reference numbers, the biller copies the whole list <strong>once</strong>. After that, every <strong>Ctrl + V</strong> in the TMS pastes the <strong>next</strong> number in order. There is no need to go back and forth between the document and the TMS for each number.
+  </div>
+  <div class="how-grid">
+    <div class="how-step">
+      <div class="step-num">01</div>
+      <div class="step-title">Copy the list</div>
+      <div class="step-desc">Copy the numbers from the document (for example with a screen text capture). Commas, slashes, spaces or line breaks between them are all fine.</div>
+    </div>
+    <div class="how-step">
+      <div class="step-num">02</div>
+      <div class="step-title">Load it</div>
+      <div class="step-desc">Press <strong style="color:var(--text)">Ctrl + Right Shift</strong>. A small box opens; paste the list with Ctrl+V and the box closes by itself. The list is ready.</div>
+    </div>
+    <div class="how-step">
+      <div class="step-num">03</div>
+      <div class="step-title">Paste in order</div>
+      <div class="step-desc">In the TMS, each <strong style="color:var(--text)">Ctrl + V</strong> pastes the next number. A small panel shows what was just pasted and what comes next.</div>
+    </div>
+    <div class="how-step">
+      <div class="step-num">04</div>
+      <div class="step-title">Done</div>
+      <div class="step-desc">After the last number, the queue empties itself and a notification confirms that all numbers were pasted.</div>
+    </div>
+  </div>
+
+  <div class="cards-2" style="margin-top:12px">
+    <div class="card c-purple">
+      <div class="badge badge-purple">Example</div>
+      <div class="card-title">Copied text → queue</div>
+      <div style="margin-top:4px; background:#000; border:1px solid #222; border-radius:5px; padding:8px 12px; font-family:var(--mono); font-size:11px; line-height:1.8; color:#9094A4;">
+        Copied: <span style="color:#fff;">4500123, 4500456 / 4500789<br>4500456 4500999</span><br>
+        Queue: <span style="color:#1AE87A;">4500123 → 4500456 → 4500789 → 4500999</span><br>
+        <span style="color:#FFD43B;">1 duplicate removed</span> (4500456 appeared twice)
+      </div>
+    </div>
+    <div class="card c-green">
+      <div class="badge badge-green">Visual check</div>
+      <div class="card-title">Always know what was pasted</div>
+      <div class="card-desc">After every paste, a small panel confirms the number that was pasted and the one that is loaded next. If it does not match the screen, the biller notices immediately instead of at the end.</div>
+      <div style="margin-top:4px; display:inline-block; background:#0a0a0a; border:1px solid #1AE87A; padding:6px 10px; font-family:var(--mono); font-size:11px; color:#1AE87A; line-height:1.6;">
+        PASTED: 4500456<br>NEXT 3/4 : 4500789
+      </div>
+    </div>
+  </div>
+  <div class="cards-2" style="margin-top:12px">
+    <div class="card c-yellow">
+      <div class="badge badge-yellow">Duplicates</div>
+      <div class="card-title">Repeated numbers are removed automatically</div>
+      <div class="card-desc">If the same number appears more than once in the copied text, it is kept only the first time (upper or lower case does not matter). The notification says how many repeats were removed.</div>
+    </div>
+    <div class="card c-gray">
+      <div class="badge badge-gray">Extra keys</div>
+      <div class="card-title">Jump fields and start over</div>
+      <div class="card-desc">The <strong style="color:var(--text)">`</strong> key (above Tab) sends 7 Tab presses to jump to the next block of fields. <strong style="color:var(--text)">Left Ctrl + Space</strong> clears the queue and the clipboard at any time.</div>
+    </div>
+  </div>
+
+  <!-- MODULE 4: KG TO LBS -->
+  <div class="module-head">
+    <span class="module-num">Module 4</span>
+    <span class="module-title">kg → lbs converter — no calculator needed</span>
+  </div>
+  <div class="cards-2">
+    <div class="card c-green">
+      <div class="badge badge-green">How it works</div>
+      <div class="card-title">Click, type, Enter</div>
+      <div class="card-desc">A tiny <strong style="color:var(--text)">KG</strong> box stays on screen next to the counter. Click it, type the weight in kilograms and press Enter. The pounds appear instantly, <strong style="color:var(--text)">rounded up</strong> (kg × 2.205) so the declared weight is never short.</div>
+      <div style="display:flex; gap:10px; align-items:center; margin-top:6px; flex-wrap:wrap;">
+        <div style="font-family:Arial,sans-serif; font-size:10px; font-weight:700; color:#1AE87A; background:#2d2d2d; border:1px solid #1AE87A; padding:2px 6px;">KG</div>
+        <span style="color:var(--text3); font-family:var(--mono); font-size:12px;">→</span>
+        <div style="background:#000; border:1px solid #222; padding:4px 10px; font-family:var(--mono); font-size:11px; text-align:center; line-height:1.5;">
+          <span style="color:#1AE87A;">1103 lbs</span><br><span style="color:#fff; border:1px solid #444; padding:0 14px;">500</span>
+        </div>
+      </div>
+    </div>
+    <div class="card c-gray">
+      <div class="badge badge-gray">Details</div>
+      <div class="card-title">Small, quick and error-proof</div>
+      <div class="card-desc">Only digits can be typed. The result stays visible for 15 seconds (or until Esc is pressed), then the box shrinks back to its small size. It uses the mouse only, so it never interferes with keyboard shortcuts in the TMS.</div>
+    </div>
+  </div>
+
+
+  <hr class="divider">
+
+  <!-- KEYBOARD SHORTCUTS -->
+  <div class="section-head">
+    <span class="section-num">Controls</span>
+    <span class="section-title">Everything the biller needs to know</span>
+  </div>
+  <div class="info-box" style="border-left-color: var(--text3);">
+    The whole toolkit starts with one double-click on <span class="hl-g">iniciar_contador.bat</span> and runs in the background for the entire shift.
+  </div>
+  <div class="shortcuts">
+    <div class="shortcut">
+      <span class="key">Alt + S</span>
+      <div class="shortcut-desc">Count 1 bill and restart the bill timer. Protected by a <strong style="color:var(--text)">10-second lock</strong> so a lag or retry never counts twice.</div>
+    </div>
+    <div class="shortcut">
+      <span class="key">F12</span>
+      <div class="shortcut-desc">Undo 1 bill. Cannot go below 0.</div>
+    </div>
+    <div class="shortcut">
+      <span class="key">F11</span>
+      <div class="shortcut-desc">End of shift: asks for confirmation, then shows the report. Press F11 again or click the report to close it and start fresh.</div>
+    </div>
+  </div>
+  <div class="shortcuts" style="margin-top:10px">
+    <div class="shortcut">
+      <span class="key">Ctrl + Right Shift</span>
+      <div class="shortcut-desc">Open the box to load a new list of PO/BOL numbers.</div>
+    </div>
+    <div class="shortcut">
+      <span class="key">Ctrl + V</span>
+      <div class="shortcut-desc">Paste the next number from the queue.</div>
+    </div>
+    <div class="shortcut">
+      <span class="key">`</span>
+      <div class="shortcut-desc">Send 7 Tab presses to jump to the next block of fields.</div>
+    </div>
+    <div class="shortcut">
+      <span class="key">Left Ctrl + Space</span>
+      <div class="shortcut-desc">Clear the queue and the clipboard.</div>
+    </div>
+    <div class="shortcut">
+      <span class="key">Click "KG"</span>
+      <div class="shortcut-desc">Open the kg → lbs converter.</div>
+    </div>
+  </div>
+
+
+  <!-- SAFEGUARDS -->
+  <div class="section-head" style="margin-top:2rem">
+    <span class="section-num">Safeguards</span>
+    <span class="section-title">Built-in protections against errors</span>
+  </div>
+  <div class="cards-2">
+    <div class="card c-green">
+      <div class="badge badge-green">Alt + S — 10-second lock</div>
+      <div class="card-title">Prevents duplicate bill counts</div>
+      <div class="card-desc">Every time Alt + S is pressed, the tool records a timestamp. If the same key fires again within 10 seconds — due to a system lag, a processing error, or an accidental double-press — the second trigger is silently ignored. The counter only goes up once per valid action.</div>
+      <div style="margin-top:8px; background:#000; border:1px solid #222; border-radius:5px; padding:6px 12px; font-family:'IBM Plex Mono',monospace; font-size:11px; color:#555; line-height:1.8;">
+        <span style="color:#1AE87A;">Press Alt+S</span> → count: 24 → timestamp saved<br>
+        <span style="color:#FF4D4D;">Error retry within 10s</span> → ignored ✓<br>
+        <span style="color:#1AE87A;">Press Alt+S after 10s</span> → count: 25 → OK
+      </div>
+    </div>
+    <div class="card c-yellow">
+      <div class="badge badge-yellow">F11 — Report & reset flow</div>
+      <div class="card-title">View report, then reset — overlay always keeps running</div>
+      <div class="card-desc">Pressing F11 shows a confirmation dialog. Confirming opens the report while the overlay continues running behind it. The report stays visible as long as you need. Closing it — by clicking anywhere on it or pressing <strong style="color:var(--green)">F11</strong> again — resets the counter, buffer, and log to zero. The overlay is immediately ready for the next shift.</div>
+      <div style="margin-top:8px; background:#000; border:1px solid #222; border-radius:5px; padding:6px 12px; font-family:'IBM Plex Mono',monospace; font-size:11px; line-height:1.8;">
+        <span style="color:#FFD43B;">F11 pressed</span> → confirmation dialog<br>
+        <span style="color:#1AE87A;">Yes</span> → report shown, overlay keeps running<br>
+        <span style="color:#1AE87A;">F11 or click on report</span> → reset to 0, ready for next shift<br>
+        <span style="color:#FF4D4D;">No in dialog</span> → cancelled, overlay unchanged
+      </div>
+    </div>
+  </div>
+
+  <!-- SAFEGUARD: 4AM RESET -->
+  <div class="cards-2" style="margin-top:12px">
+    <div class="card c-green" style="margin-top:0">
+      <div class="badge badge-green">4am auto-reset</div>
+      <div class="card-title">Overnight protection — counter resets at 4am</div>
+      <div class="card-desc">If the program is left open overnight — PC in sleep mode, forgot to press F11 — the counter and all history reset automatically at 4am. The next shift always starts with a clean slate. If you worked OT until 3am, press F11 before 4am to capture the full report before the reset fires.</div>
+      <div style="margin-top:8px; background:#000; border:1px solid #222; border-radius:5px; padding:6px 12px; font-family:'IBM Plex Mono',monospace; font-size:11px; color:#555; line-height:1.8;">
+        <span style="color:#FFD43B;">Forgot F11, PC in sleep</span> → program still open<br>
+        <span style="color:#FF4D4D;">4:00am arrives</span> → counter resets to 0<br>
+        <span style="color:#1AE87A;">Next shift opens clean</span> → no leftover data ✓
+      </div>
+    </div>
+    <div class="card c-orange">
+      <div class="badge badge-orange">OT zero-count discard</div>
+      <div class="card-title">Opened the tool early but didn't work — zero penalty</div>
+      <div class="card-desc">If you open the overlay before your shift starts and don't press Alt+S at all, the pre-shift hour is silently discarded when the next hour begins. No penalty, no entry in the report, no impact on the buffer. The same applies to any post-shift hour where you registered nothing.</div>
+      <div style="margin-top:8px; background:#000; border:1px solid #222; border-radius:5px; padding:6px 12px; font-family:'IBM Plex Mono',monospace; font-size:11px; color:#555; line-height:1.8;">
+        <span style="color:#FFD43B;">Open at 1:55pm, count = 0</span><br>
+        <span style="color:#1AE87A;">2pm arrives</span> → 1pm hour discarded ✓<br>
+        <span style="color:#1AE87A;">Shift starts clean at 2pm</span> → no impact ✓
+      </div>
+    </div>
+  </div>
+
+  <div class="cards-2" style="margin-top:12px">
+    <div class="card c-purple" style="margin-top:0">
+      <div class="badge badge-purple">Paste queue checks</div>
+      <div class="card-title">Order, duplicates and confirmation</div>
+      <div class="card-desc">Numbers are always pasted in the order they were copied, duplicates are removed before pasting starts, and the on-screen panel confirms every paste. A short pause after each paste gives the TMS time to receive the number before the next one is loaded, so no number is skipped on a slow screen.</div>
+    </div>
+    <div class="card c-gray" style="margin-top:0">
+      <div class="badge badge-gray">One copy at a time</div>
+      <div class="card-title">Cannot run twice by mistake</div>
+      <div class="card-desc">If the launcher is double-clicked again while the toolkit is already open, the second copy closes itself, so bills are never counted twice. If the paste queue ever runs into an unexpected problem, it stops and shows a notification, while the counter keeps running.</div>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- BENEFITS -->
+  <div class="section-head">
+    <span class="section-num">Value</span>
+    <span class="section-title">What the team and the company gain</span>
+  </div>
+  <div class="cards-3">
+    <div class="card c-green">
+      <div class="card-title">Self-management during the shift</div>
+      <div class="card-desc">Each biller sees pace and buffer at all times and can correct a slow hour while there is still time to recover it.</div>
+    </div>
+    <div class="card c-yellow">
+      <div class="card-title">Slow bills surface early</div>
+      <div class="card-desc">The bill timer makes long bills visible within minutes, so they can be saved or escalated instead of quietly consuming the hour.</div>
+    </div>
+    <div class="card c-purple">
+      <div class="card-title">Fewer data-entry errors</div>
+      <div class="card-desc">The paste queue keeps numbers in order, removes duplicates and confirms every paste, reducing skipped or repeated references.</div>
+    </div>
+    <div class="card c-green">
+      <div class="card-title">Consistent weight conversions</div>
+      <div class="card-desc">Every kg → lbs conversion uses the same factor and the same rounding rule, without a calculator.</div>
+    </div>
+    <div class="card c-orange">
+      <div class="card-title">Objective end-of-shift summary</div>
+      <div class="card-desc">Average per hour, total bills, buffer, best hour and an hour-by-hour breakdown, with breaks, lunch and overtime handled automatically.</div>
+    </div>
+    <div class="card c-gray">
+      <div class="card-title">Zero cost, zero installation</div>
+      <div class="card-desc">Built only with tools already available on company PCs (Windows PowerShell). Nothing to buy, install or maintain on a server.</div>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- SECURITY -->
+  <div class="section-head">
+    <span class="section-num">Security</span>
+    <span class="section-title">Local only — no data leaves the computer</span>
+  </div>
+  <div class="info-box" style="border-left-color: var(--green);">
+    The toolkit has <strong>no network code of any kind</strong>: no web requests, no API calls, no cloud sync, no telemetry. The counter only stores numbers (bill counts and minutes) on the employee's own PC. The paste queue works exactly like the employee's own copy and paste: the numbers the biller copies are kept <strong>in memory only</strong> and placed on the Windows clipboard one at a time. Nothing is written to disk or sent anywhere, and the list is discarded when it is finished, when it is cleared, or when the toolkit is closed.
+  </div>
+  <div class="cards-2">
+    <div class="card c-green">
+      <div class="badge badge-green">No network activity</div>
+      <div class="card-title">Zero outbound or inbound connections</div>
+      <div class="card-desc">The script contains no networking commands at all. It cannot send data out or pull anything in, even accidentally. It only uses standard Windows functions to read a few shortcut keys and to draw its own small windows.</div>
+    </div>
+    <div class="card c-green">
+      <div class="badge badge-green">What is stored</div>
+      <div class="card-title">Only bill counts, on the employee's own PC</div>
+      <div class="card-desc">The counter saves a bill count, the buffer and minutes per hour in the employee's own Windows profile (<span style="font-family:var(--mono)">HKCU\Software\ContadorOverlay</span>) so progress survives a restart. No PO numbers, BOL numbers, customer names, addresses or other TMS content are ever saved.</div>
+    </div>
+  </div>
+  <div class="cards-2" style="margin-top:12px">
+    <div class="card c-green" style="margin-top:0">
+      <div class="badge badge-green">Not a keylogger</div>
+      <div class="card-title">Listens only to its own shortcut keys</div>
+      <div class="card-desc">The toolkit only checks whether its specific shortcuts are pressed (Alt+S, F11, F12, Ctrl+V, Ctrl+Right Shift, Left Ctrl+Space and the ` key). It does not record, store or send what the employee types.</div>
+    </div>
+    <div class="card c-gray" style="margin-top:0">
+      <div class="badge badge-gray">No installs</div>
+      <div class="card-title">One script, no footprint left behind</div>
+      <div class="card-desc">Nothing is installed, no services or scheduled tasks are created, and nothing runs once the toolkit is closed. A temporary file in <span style="font-family:var(--mono)">%TEMP%</span> only prevents two copies from running at once.</div>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- QUICK REFERENCE -->
+  <div class="section-head">
+    <span class="section-num">Quick ref</span>
+    <span class="section-title">All thresholds at a glance</span>
+  </div>
+  <div class="cards">
+    <div class="card">
+      <div class="card-title" style="font-size:12px;color:var(--text3)">Normal hour (60 min)</div>
+      <table style="width:100%;font-size:12px;font-family:var(--mono);margin-top:6px">
+        <tr><td style="color:var(--red);padding:3px 0">&lt; 16 bills</td><td style="color:var(--text3)">Red</td></tr>
+        <tr><td style="color:var(--yellow);padding:3px 0">16–31 bills</td><td style="color:var(--text3)">Yellow</td></tr>
+        <tr><td style="color:var(--green);padding:3px 0">32–34 bills</td><td style="color:var(--text3)">Green</td></tr>
+        <tr><td style="color:var(--purple);padding:3px 0">≥ 35 bills</td><td style="color:var(--text3)">Purple ★</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <div class="card-title" style="font-size:12px;color:var(--text3)">Break hour (45 min)</div>
+      <table style="width:100%;font-size:12px;font-family:var(--mono);margin-top:6px">
+        <tr><td style="color:var(--red);padding:3px 0">&lt; 12 bills</td><td style="color:var(--text3)">Red</td></tr>
+        <tr><td style="color:var(--yellow);padding:3px 0">12–23 bills</td><td style="color:var(--text3)">Yellow</td></tr>
+        <tr><td style="color:var(--green);padding:3px 0">24–27 bills</td><td style="color:var(--text3)">Green</td></tr>
+        <tr><td style="color:var(--purple);padding:3px 0">≥ 28 bills</td><td style="color:var(--text3)">Purple ★</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <div class="card-title" style="font-size:12px;color:var(--text3)">Buffer thresholds</div>
+      <table style="width:100%;font-size:12px;font-family:var(--mono);margin-top:6px">
+        <tr><td style="color:var(--red);padding:3px 0">≤ 0</td><td style="color:var(--text3)">Deficit</td></tr>
+        <tr><td style="color:var(--yellow);padding:3px 0">+1 to +7</td><td style="color:var(--text3)">Slight lead</td></tr>
+        <tr><td style="color:var(--green);padding:3px 0">+8 to +15</td><td style="color:var(--text3)">Good</td></tr>
+        <tr><td style="color:var(--purple);padding:3px 0">≥ +16</td><td style="color:var(--text3)">Excellent</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <div class="card-title" style="font-size:12px;color:var(--text3)">Lunch hour (7pm)</div>
+      <div class="card-desc" style="margin-top:8px;font-family:var(--mono);font-size:12px;color:var(--gray)">
+        Any count → ignored<br>
+        0 minutes added to time<br>
+        Buffer → unchanged<br>
+        Report → excluded entirely
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title" style="font-size:12px;color:var(--orange)">OT hour (outside 2pm–11pm)</div>
+      <table style="width:100%;font-size:12px;font-family:var(--mono);margin-top:6px">
+        <tr><td style="color:var(--gray);padding:3px 0">0 bills</td><td style="color:var(--text3)">Discarded silently</td></tr>
+        <tr><td style="color:var(--red);padding:3px 0">&lt; 16 bills</td><td style="color:var(--text3)">Red — counts</td></tr>
+        <tr><td style="color:var(--yellow);padding:3px 0">16–31 bills</td><td style="color:var(--text3)">Yellow — counts</td></tr>
+        <tr><td style="color:var(--green);padding:3px 0">32–34 bills</td><td style="color:var(--text3)">Green — counts</td></tr>
+        <tr><td style="color:var(--purple);padding:3px 0">≥ 35 bills</td><td style="color:var(--text3)">Purple ★ — counts</td></tr>
+      </table>
+      <div style="margin-top:6px;font-size:11px;color:var(--text3);font-family:var(--mono)">Tagged as OT in report. Goal = 32. Resets at 4am if F11 not pressed.</div>
+    </div>
+    <div class="card">
+      <div class="card-title" style="font-size:12px;color:var(--text3)">Bill timer</div>
+      <table style="width:100%;font-size:12px;font-family:var(--mono);margin-top:6px">
+        <tr><td style="color:var(--green);padding:3px 0">0:00 – 1:59</td><td style="color:var(--text3)">Green</td></tr>
+        <tr><td style="color:var(--yellow);padding:3px 0">2:00 – 4:59</td><td style="color:var(--text3)">Yellow</td></tr>
+        <tr><td style="color:var(--orange);padding:3px 0">5:00 – 9:59</td><td style="color:var(--text3)">Orange</td></tr>
+        <tr><td style="color:var(--red);padding:3px 0">10:00 – 13:59</td><td style="color:var(--text3)">Red</td></tr>
+        <tr><td style="color:var(--red);padding:3px 0">14:00 +</td><td style="color:var(--text3)">SAVE NOW</td></tr>
+      </table>
+    </div>
+  </div>
+
+</div><!-- /main -->
+
+<div class="footer">
+  <span>BPH Counter Overlay — Billing Productivity Toolkit &nbsp;·&nbsp; Miguel Alejandro Guerra Sifuentes</span>
+  <span>Biller &nbsp;·&nbsp; 2pm–11pm &nbsp;·&nbsp; Central Transport México &nbsp;|&nbsp; Goal: 32 bills/hr</span>
+</div>
+
+</body>
+</html>
