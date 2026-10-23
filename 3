@@ -1,0 +1,3271 @@
+if ([Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
+
+    Start-Process -FilePath 'conhost.exe' -ArgumentList @(
+        '--headless', 'powershell.exe', '-NoProfile', '-STA', '-File', "`"$PSCommandPath`""
+    ) -WindowStyle Hidden
+    exit
+}
+
+$script:SingleInstanceMutex = New-Object System.Threading.Mutex($false, 'Local\ForceMenu_Miguel_SingleInstance')
+if (-not $script:SingleInstanceMutex.WaitOne(0)) {
+    exit
+}
+
+Add-Type -AssemblyName PresentationFramework
+Add-Type -AssemblyName PresentationCore
+Add-Type -AssemblyName WindowsBase
+Add-Type -AssemblyName System.Windows.Forms
+
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class LocalKeyState {
+    [DllImport("user32.dll")]
+    public static extern short GetAsyncKeyState(int vKey);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+    [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")]
+    private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetConsoleWindow();
+
+    public static void HideConsole() {
+        IntPtr h = GetConsoleWindow();
+        if (h != IntPtr.Zero) { ShowWindow(h, 0); }
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+
+    private const int GWL_EXSTYLE      = -20;
+    private const int WS_EX_TOOLWINDOW = 0x00000080;
+    private const int WS_EX_APPWINDOW  = 0x00040000;
+
+    public static void HideFromAltTab(IntPtr hWnd) {
+        int exStyle = GetWindowLong(hWnd, GWL_EXSTYLE);
+        exStyle |= WS_EX_TOOLWINDOW;
+        exStyle &= ~WS_EX_APPWINDOW;
+        SetWindowLong(hWnd, GWL_EXSTYLE, exStyle);
+    }
+
+    public static IntPtr GetForeground() { return GetForegroundWindow(); }
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindow(IntPtr hWnd);
+
+    private const byte VK_CONTROL = 0x11;
+    private const uint KEYEVENTF_KEYUP = 0x2;
+
+    public static void ForceForeground(IntPtr hWnd) {
+
+        // Ctrl fantasma (antes Alt: el Alt le llegaba a la ventana y le abria
+        // su menu / barra de Edge, y luego las teclas no caian en la pagina)
+        keybd_event(VK_CONTROL, 0, 0, UIntPtr.Zero);
+        keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+
+        IntPtr fg = GetForegroundWindow();
+        uint dummyProcId;
+        uint fgThread = GetWindowThreadProcessId(fg, out dummyProcId);
+        uint curThread = GetCurrentThreadId();
+        bool attached = false;
+        if (fgThread != curThread) {
+            attached = AttachThreadInput(curThread, fgThread, true);
+        }
+        ShowWindow(hWnd, IsIconic(hWnd) ? 9 : 5);
+        BringWindowToTop(hWnd);
+        SetForegroundWindow(hWnd);
+        if (attached) {
+            AttachThreadInput(curThread, fgThread, false);
+        }
+    }
+}
+"@
+
+[LocalKeyState]::HideConsole()
+
+$HoldText   = 'Hold at term xxx DUE TO'
+
+# Velocidad de F1/F2 (tabla $Global:ForceT). Sale en el menu junto a la build.
+# Escala: 10 = 15j, 9 = 15k, 8 = 15m, 7 = 15n, 6 = 17l, 5 = 20d, 4 = 20e / 20q, 3 = 20p
+$VelocidadForce = 4
+# 20e: velocidad 4 con deteccion por color en las esperas de Edge
+# 20f: velocidad 3 (1er intento del PRO con teclas de mano, E5 lo cuida el color)
+# 20g: sin Ctrl+Flechas (los usas para moverte en el texto), color mas fino en E1/F1
+# 20h: intra vieja segura otra vez (E5 420, color solo en la zona del buscador viejo, no sigue si se ve vacia)
+# 20i: resumen_ultimas.txt mas corto; coordenadas base propias (misma velocidad 3)
+# 20k: pro sticker F1 + class, nmfc, hu; nuevo pro sticker en F2 (cosas de hazmat)
+# 20l: Insert con el menu cerrado ya no hace nada; Ctrl+Insert = PRO F1, Ctrl+RePag = PRO F2 (sin notas)
+# 20m: limpieza (sin Fin sola, sin barra de botones, sin UI Automation, sin codigo que ya no se usa)
+# 20n: ilegible + accessorial y special instructions
+# 20o: intra vieja: si no cargo a tiempo sigue esperando (hasta 2 s mas) y revisa que el PRO si se escribio
+# 20p: E6 detecta cambios chicos (0.4 %): si la intra vieja ya cargo durante E5 solo cambia el PRO del buscador
+# 20q: regreso a los tiempos de la speed 4 con todas las mejoras de la 20p (la 3 fallaba 1/10 en la nota intra)
+# 20r: lookup sin notas tambien cierra la parte del PRO (Alt+C); intra normal revisa que el PRO si se escribio
+# 20s: sticker (F1 y F2) tambien puede estar en description
+# 20t: sin Fin en PRESS ENTER; un solo log (ultimas 10 F1 y 10 F2 con detalle); F1/F2 empiezan en medio
+$ScriptVersion = "build 2026-10-23t (SPEED $VelocidadForce)"
+
+
+# Motor (clicks/teclas en ERP e intra), incluido en este archivo.
+# Coordenadas propias: coordenadas_mias.txt (misma carpeta, opcional).
+# $true = motor prendido (flujo automatico, audit, Ctrl+Insert / Ctrl+RePag)
+# $false = solo el menu (copia las notas y las pegas tu)
+$UsarBotonesMotor = $true
+
+# Flujo automatico (sin botones): al dar Enter en "revisar" la nota:
+#   1) pega la nota en el ERP y espera a que TU guardes (Alt+O)
+#   2) al guardar: saca el PRO, lo busca en intra, abre la nota intra,
+#      la pone en informational y pega la nota
+#      (con hold: despues del PRO pide la terminal y al dar Enter pega intra)
+#   Mientras espera: Fin = seguir sin Alt+O, Supr = cancelar.
+# $true = flujo automatico   $false = como antes (solo copia las notas)
+$FlujoAutomatico = $true
+
+# Ctrl + Insert = PRO lookup F1 sin notas (intra normal)
+# Ctrl + RePag  = PRO lookup F2 sin notas (intra normal + intra vieja)
+# (Ctrl+Flechas ya no: sirven para moverte en el texto)
+
+# Switch AUDIT en pantalla (abajo a la derecha): apaga / prende Ctrl izq + Abajo.
+# $false = arranca APAGADO (para que no se dispare mientras trabajas)
+$AuditPrendidoAlInicio = $false
+$script:AuditActivo = $AuditPrendidoAlInicio
+
+
+$Campos       = @('bol','po','quote','weight','reference num')
+$CamposIlegible = @('bol','po','quote','weight','reference num','class','nmfc','accessorial','special instructions')   # ilegible (9 = maximo del numpad)
+$CamposSticker  = @('bol','po','quote','weight','reference num','class','nmfc','hu','description')   # F1 pro sticker (9 = maximo del numpad)
+# F2 pro sticker: el sticker tapa algo del breakdown de hazmat -> haz-sticker on un number,haz weight
+$CamposStickerHaz = @('un number','shipping name','hazard class','packing group','haz weight','haz pieces','emergency contact','description')
+$ShprList = @('name','address','city','state','zip','city/zip dont route','no shipper info','invalid city')
+$ConsList = @('name','address','city','state','zip','city/zip dont route','no consignee info','invalid city')
+$MissingPageList = @('missing page','with breakdown','po','special instructions')   # F1 y F2
+
+$Force1Issues = @(
+    [PSCustomObject]@{ Label='shpr';         Tag='shpr';         Sub='multi'; SubList=$ShprList; Full='no shipper info' }
+    [PSCustomObject]@{ Label='cons';         Tag='cons';         Sub='multi'; SubList=$ConsList; Full='no consignee info' }
+    [PSCustomObject]@{ Label='missing page'; Tag='missing page'; Sub='reason'; SubList=$MissingPageList }
+    [PSCustomObject]@{ Label='pro sticker';  Tag='pro sticker';  Sub='pro'; SubList=$CamposSticker }
+    [PSCustomObject]@{ Label='ilegible';     Tag='ilegible';     Sub='pro'; SubList=$CamposIlegible }
+)
+
+$Force2Issues = @(
+    [PSCustomObject]@{ Label='improper shipping name';    Tag='improper shipping name for'; Sub='text'; Prompt='Item with the wrong shipping name'; Sep=' ' }
+    [PSCustomObject]@{ Label='no hazmat info';            Tag='no hazmat info';            Sub='none' }
+    [PSCustomObject]@{ Label='missing chemical const.';   Tag='missing chemical const for'; Sub='text'; Prompt='Missing item'; Sep=' ' }
+    [PSCustomObject]@{ Label='weight breakdown';          Tag='weight breakdown';          Sub='none' }
+    [PSCustomObject]@{ Label='missing emergency contact'; Tag='missing emergency contact'; Sub='none' }
+    [PSCustomObject]@{ Label='shipper cert not signed';   Tag='shipper cert not signed';   Sub='none' }
+    [PSCustomObject]@{ Label='prohibited freight';        Tag='prohibited';                Sub='text'; Prompt='Freight name' }
+    [PSCustomObject]@{ Label='missing page';              Tag='missing page';              Sub='reason'; SubList=$MissingPageList }
+    [PSCustomObject]@{ Label='pro sticker';               Tag='sticker on';                Sub='pro'; SubList=$CamposStickerHaz }
+)
+
+$C = @{
+    Bg        = '#16191D'
+    Panel     = '#1F242A'
+    Key       = '#2A3038'
+    KeyBorder = '#3A424C'
+    Text      = '#E6EAEE'
+    Dim       = '#7E8893'
+    F1        = '#4C8DF6'
+    HAZ       = '#F29F05'
+    HOLD      = '#A7B0BA'
+}
+$SEP   = ' ' + [char]0x203A + ' '
+$CHECK = [string][char]0x2713
+
+$script:State        = 'hidden'
+$script:Basket       = New-Object System.Collections.Generic.List[string]
+$script:CurrentForce = $null
+$script:CurrentIssue = $null
+$script:ListCtx      = ''
+$script:LM_Options   = @()
+$script:LM_Multi     = $false
+$script:LM_Highlight = 0
+$script:LM_Selected  = New-Object System.Collections.Generic.HashSet[int]
+$script:TermDigits   = ''
+$script:FreeText      = ''
+$script:FreeTextIssue = $null
+$script:FreeTextBox   = $null
+$script:NotaERP      = ''
+$script:LastCopied   = ''
+$script:NotePair     = @()
+$script:NoteIdx      = 0
+$script:History      = New-Object System.Collections.Generic.List[object]
+$script:PendingErpNote   = ''
+$script:PendingForce     = $null
+$script:WatermarkAccent  = $null
+$script:LastError         = ''
+
+$Win = New-Object System.Windows.Window
+$Win.WindowStyle           = 'None'
+$Win.AllowsTransparency    = $true
+$Win.Background            = 'Transparent'
+$Win.Topmost               = $true
+$Win.ShowInTaskbar         = $false
+$Win.SizeToContent         = 'WidthAndHeight'
+$Win.WindowStartupLocation = 'CenterScreen'
+$Win.Visibility            = 'Hidden'
+
+$RootGrid = New-Object System.Windows.Controls.Grid
+$Win.Content = $RootGrid
+
+$Win.Add_SourceInitialized({
+    param($s, $e)
+    $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($Win)).Handle
+    [LocalKeyState]::HideFromAltTab($hwnd)
+})
+
+function B([string]$hex) { return [System.Windows.Media.BrushConverter]::new().ConvertFromString($hex) }
+function Get-Soft([string]$hex) { return '#33' + $hex.Substring(1) }
+function Clear-Root { $RootGrid.Children.Clear() }
+function Trunc([string]$s, [int]$max) {
+    if ($s.Length -le $max) { return $s }
+    return $s.Substring(0, $max - 1) + [char]0x2026
+}
+
+function Get-Accent {
+    switch ($script:CurrentForce) {
+        'f1'   { return $C.F1 }
+        'haz'  { return $C.HAZ }
+        'hold' { return $C.HOLD }
+    }
+    return $C.Dim
+}
+function Get-Prefix     { if ($script:CurrentForce -eq 'f1') { 'f1' } else { 'haz' } }
+function Get-ForceLabel {
+    switch ($script:CurrentForce) {
+        'f1'   { return 'FORCE 1' }
+        'haz'  { return 'FORCE 2  HAZ' }
+        'hold' { return 'HOLD' }
+    }
+    return ''
+}
+function Get-Issues { if ($script:CurrentForce -eq 'f1') { $Force1Issues } else { $Force2Issues } }
+function Get-NotaERP {
+
+    if ($script:Basket.Count -eq 1 -and $script:Basket[0] -like 'prohibited-*') {
+        return $script:Basket[0]
+    }
+    return "$(Get-Prefix)-" + ($script:Basket -join ',')
+}
+
+function New-Text([string]$t, [double]$size = 14, [string]$color = '', [string]$weight = 'Normal') {
+    if (-not $color) { $color = $C.Text }
+    $tb = New-Object System.Windows.Controls.TextBlock
+    $tb.Text = $t.ToUpper()
+    $tb.FontSize = $size
+    $tb.FontFamily = 'Segoe UI'
+    $tb.Foreground = B $color
+    $tb.FontWeight = $weight
+    $tb.TextWrapping = 'Wrap'
+    $tb.VerticalAlignment = 'Center'
+    return $tb
+}
+
+function New-Keycap([string]$label, [string]$accent = '', [double]$size = 12) {
+    $b = New-Object System.Windows.Controls.Border
+    $b.Background = B $C.Key
+    $b.BorderBrush = B $(if ($accent) { $accent } else { $C.KeyBorder })
+    $b.BorderThickness = '1,1,1,2'
+    $b.CornerRadius = '4'
+    $b.Padding = '6,1,6,1'
+    $b.MinWidth = 24
+    $b.VerticalAlignment = 'Center'
+    $t = New-Text $label $size $C.Text 'SemiBold'
+    $t.TextWrapping = 'NoWrap'
+    $t.HorizontalAlignment = 'Center'
+    $b.Child = $t
+    return $b
+}
+
+function Show-Frame {
+    param([string]$crumb, $body, [string[]]$preview, [string[]]$keys, [string]$accent)
+    Clear-Root
+
+    $outer = New-Object System.Windows.Controls.Border
+    $outer.Width = 440
+    $outer.Background = B $C.Bg
+    $outer.BorderBrush = B $accent
+    $outer.BorderThickness = '1'
+    $outer.CornerRadius = '12'
+    $stack = New-Object System.Windows.Controls.StackPanel
+    $outer.Child = $stack
+
+    $head = New-Object System.Windows.Controls.Border
+    $head.Background = B (Get-Soft $accent)
+    $head.CornerRadius = '11,11,0,0'
+    $head.Padding = '16,9,16,9'
+    $head.Child = (New-Text $crumb 13 $accent 'SemiBold')
+    $head.Cursor = [System.Windows.Input.Cursors]::SizeAll
+    $head.Add_MouseLeftButtonDown({
+        param($s, $e)
+        try { $Win.DragMove() } catch {}
+    })
+    [void]$stack.Children.Add($head)
+
+    $bodyWrap = New-Object System.Windows.Controls.Border
+    $bodyWrap.Padding = '16,12,16,10'
+    $bodyWrap.Child = $body
+    [void]$stack.Children.Add($bodyWrap)
+
+    if ($preview -and $preview.Count -ge 2) {
+        $pv = New-Object System.Windows.Controls.Border
+        $pv.Background = B $C.Panel
+        $pv.CornerRadius = '6'
+        $pv.Padding = '10,8,10,8'
+        $pv.Margin = '16,0,16,12'
+        $pvs = New-Object System.Windows.Controls.StackPanel
+        for ($i = 0; $i -lt $preview.Count - 1; $i += 2) {
+            $lab = New-Text $preview[$i] 11 $C.Dim
+            if ($i -gt 0) { $lab.Margin = '0,6,0,0' }
+
+            $txt = New-Object System.Windows.Controls.TextBox
+            $txt.Text = $preview[$i + 1].ToUpper()
+            $txt.IsReadOnly = $true
+            $txt.IsUndoEnabled = $false
+            $txt.BorderThickness = '0'
+            $txt.Background = [System.Windows.Media.Brushes]::Transparent
+            $txt.Foreground = B $C.Text
+            $txt.CaretBrush = B $C.Text
+            $txt.SelectionBrush = B (Get-Soft $accent)
+            $txt.Padding = '0'
+            $txt.Margin = '0'
+            $txt.FontSize = 13
+            $txt.TextWrapping = 'Wrap'
+            $txt.Cursor = [System.Windows.Input.Cursors]::IBeam
+            $txt.FocusVisualStyle = $null
+            $txt.FontFamily = 'Consolas'
+            [void]$pvs.Children.Add($lab)
+            [void]$pvs.Children.Add($txt)
+        }
+        $pv.Child = $pvs
+        [void]$stack.Children.Add($pv)
+    }
+
+    if ($keys -and $keys.Count -ge 2) {
+        $foot = New-Object System.Windows.Controls.WrapPanel
+        $foot.Margin = '16,0,16,14'
+        for ($i = 0; $i -lt $keys.Count - 1; $i += 2) {
+            $sp = New-Object System.Windows.Controls.StackPanel
+            $sp.Orientation = 'Horizontal'
+            $sp.Margin = '0,0,14,4'
+            [void]$sp.Children.Add((New-Keycap $keys[$i] '' 11))
+            $lt = New-Text $keys[$i + 1] 11 $C.Dim
+            $lt.Margin = '6,0,0,0'
+            [void]$sp.Children.Add($lt)
+            [void]$foot.Children.Add($sp)
+        }
+        [void]$stack.Children.Add($foot)
+    }
+
+    [void]$RootGrid.Children.Add($outer)
+}
+
+function New-Tile([string]$tag, [string]$key, [string]$title, [string]$sub, [string]$accent, [double]$width = 128) {
+    $b = New-Object System.Windows.Controls.Border
+    $b.Width = $width
+    $b.Height = 118
+    $b.Margin = '0,0,16,0'
+    $b.CornerRadius = '10'
+    $b.Background = B $C.Panel
+    $b.BorderBrush = B $accent
+    $b.BorderThickness = '2'
+    $b.Cursor = [System.Windows.Input.Cursors]::Hand
+    $b.Tag = $tag
+
+    $sp = New-Object System.Windows.Controls.StackPanel
+    $sp.VerticalAlignment = 'Center'
+    $kc = New-Keycap $key $accent 12
+    $kc.HorizontalAlignment = 'Center'
+    $kc.Margin = '0,0,0,8'
+    $tt = New-Text $title 28 $accent 'Bold'
+    $tt.HorizontalAlignment = 'Center'
+    $st = New-Text $sub 11 $C.Dim
+    $st.HorizontalAlignment = 'Center'
+    $st.TextAlignment = 'Center'
+    [void]$sp.Children.Add($kc)
+    [void]$sp.Children.Add($tt)
+    [void]$sp.Children.Add($st)
+    $b.Child = $sp
+
+    $b.Add_MouseLeftButtonUp({ param($s, $e) try { Select-Nivel1 $s.Tag } catch { Show-Flag 'Click F1/F2' $_.Exception.Message } })
+    return $b
+}
+
+function New-HistRow([int]$idx, $item) {
+    $b = New-Object System.Windows.Controls.Border
+    $b.CornerRadius = '6'
+    $b.Padding = '6,4,8,4'
+    $b.Margin = '0,1,0,1'
+    $b.Background = B $C.Panel
+    $b.Cursor = [System.Windows.Input.Cursors]::Hand
+    $b.Tag = $idx
+
+    $line = New-Object System.Windows.Controls.StackPanel
+    $line.Orientation = 'Horizontal'
+    [void]$line.Children.Add((New-Keycap ([string]($idx + 3)) '' 12))
+
+    $labelText = Trunc $item.Label 30
+    if ($item.Terminal) { $labelText = "$labelText$SEP" + "term $($item.Terminal)" }
+    $lbl = New-Text $labelText 13 $C.Text
+    $lbl.FontFamily = 'Consolas'
+    $lbl.Margin = '10,0,0,0'
+    [void]$line.Children.Add($lbl)
+    $b.Child = $line
+
+    $b.Add_MouseLeftButtonUp({ param($s, $e) try { Copy-FromHistory $s.Tag } catch { Show-Flag 'Click history' $_.Exception.Message } })
+    return $b
+}
+
+function Show-Nivel1 {
+    $script:Basket.Clear()
+    $script:CurrentForce = $null
+    $script:CurrentIssue = $null
+    $script:State = 'nivel1'
+
+    $body = New-Object System.Windows.Controls.StackPanel
+    $row = New-Object System.Windows.Controls.StackPanel
+    $row.Orientation = 'Horizontal'
+    $row.HorizontalAlignment = 'Center'
+    [void]$row.Children.Add((New-Tile 'f1'  '1' 'F1' 'f1 note'       $C.F1  186))
+    [void]$row.Children.Add((New-Tile 'haz' '2' 'F2' 'hazmat + hold' $C.HAZ 186))
+    [void]$body.Children.Add($row)
+    $alt = New-Text 'Or Left / Right arrows' 11 $C.Dim
+    $alt.Margin = '0,10,0,0'
+    $alt.HorizontalAlignment = 'Center'
+    $alt.TextAlignment = 'Center'
+    [void]$body.Children.Add($alt)
+
+    if ($script:History.Count -gt 0) {
+        $histTitle = New-Text 'History (repeat note)' 11 $C.Dim
+        $histTitle.Margin = '0,14,0,4'
+        [void]$body.Children.Add($histTitle)
+        for ($i = 0; $i -lt $script:History.Count; $i++) {
+            [void]$body.Children.Add((New-HistRow $i $script:History[$i]))
+        }
+    }
+
+    $ver = New-Text $ScriptVersion 9 $C.Dim
+    $ver.Margin = '0,14,0,0'
+    $ver.HorizontalAlignment = 'Center'
+    $ver.Opacity = 0.55
+    [void]$body.Children.Add($ver)
+
+    if ($script:LastError) {
+        $er = New-Text ('Last error: ' + $script:LastError) 10 '#E5484D'
+        $er.Margin = '0,6,0,0'
+        $er.HorizontalAlignment = 'Center'
+        $er.TextAlignment = 'Center'
+        [void]$body.Children.Add($er)
+    }
+
+    Show-Frame -crumb 'Choose type' -body $body -preview $null -keys @('Del','close') -accent $C.Dim
+}
+
+function Select-Nivel1([string]$which) {
+    $script:CurrentForce = $which
+    Enter-IssueMenu
+}
+
+function Enter-IssueMenu {
+    $script:CurrentIssue = $null
+    $script:PendientesIssue = $null
+    $labels = @(Get-Issues | ForEach-Object { $_.Label })
+    Enter-List $labels ($script:CurrentForce -eq 'haz') 'issue'
+}
+
+function Enter-List([string[]]$options, [bool]$multi, [string]$ctx) {
+    $script:LM_Options   = $options
+    $script:LM_Multi     = $multi
+    # 20t: al entrar a FORCE 1 / FORCE 2 el selector empieza en medio (tecla 5)
+    $script:LM_Highlight = $(if ($ctx -eq 'issue') { [Math]::Min(4, $options.Count - 1) } else { 0 })
+    $script:LM_Selected  = New-Object System.Collections.Generic.HashSet[int]
+    $script:ListCtx      = $ctx
+    $script:State        = 'list'
+    Draw-List
+}
+
+function Get-Crumb {
+    $c = Get-ForceLabel
+    if ($script:ListCtx -ne 'issue' -and $script:CurrentIssue) { $c += $SEP + $script:CurrentIssue.Label }
+    if ($script:ListCtx -eq 'pro-fields') { $c += $SEP + 'covering info' }
+    return $c
+}
+
+function Get-PreviewNote {
+    if ($script:Basket.Count -eq 0) { return "$(Get-Prefix)-..." }
+    return Get-NotaERP
+}
+
+function Draw-List {
+    $accent = Get-Accent
+    $count  = [Math]::Min($script:LM_Options.Count, 9)
+    $rows   = [Math]::Ceiling($count / 3)
+
+    $grid = New-Object System.Windows.Controls.Grid
+    for ($colIdx = 0; $colIdx -lt 3; $colIdx++) {
+        $cd = New-Object System.Windows.Controls.ColumnDefinition
+        $cd.Width = [System.Windows.GridLength]::new(1, [System.Windows.GridUnitType]::Star)
+        $grid.ColumnDefinitions.Add($cd)
+    }
+    for ($rowIdx = 0; $rowIdx -lt $rows; $rowIdx++) {
+        $rd = New-Object System.Windows.Controls.RowDefinition
+        $rd.Height = [System.Windows.GridLength]::Auto
+        $grid.RowDefinitions.Add($rd)
+    }
+
+    for ($i = 0; $i -lt ($rows * 3); $i++) {
+        $cell = New-Object System.Windows.Controls.Border
+        $cell.CornerRadius = '8'
+        $cell.Padding = '8,6,8,7'
+        $cell.Margin = '3'
+        $cell.MinHeight = 64
+        $cell.BorderThickness = '1'
+
+        $inner = New-Object System.Windows.Controls.StackPanel
+        $top = New-Object System.Windows.Controls.StackPanel
+        $top.Orientation = 'Horizontal'
+
+        if ($i -lt $count) {
+            $hl  = ($i -eq $script:LM_Highlight)
+            $sel = $script:LM_Multi -and $script:LM_Selected.Contains($i)
+            $cell.Background  = if ($hl) { B (Get-Soft $accent) } else { B $C.Panel }
+            $cell.BorderBrush = if ($hl -or $sel) { B $accent } else { B $C.KeyBorder }
+
+            [void]$top.Children.Add((New-Keycap ([string]($i + 1)) $(if ($hl -or $sel) { $accent } else { '' }) 12))
+            if ($sel) {
+                $mk = New-Text $CHECK 14 $accent 'Bold'
+                $mk.Margin = '6,0,0,0'
+                [void]$top.Children.Add($mk)
+            }
+            [void]$inner.Children.Add($top)
+
+            $lbl = New-Text $script:LM_Options[$i] 12.5 $(if ($sel) { $accent } else { $C.Text }) $(if ($hl -or $sel) { 'SemiBold' } else { 'Normal' })
+            $lbl.Margin = '0,5,0,0'
+            [void]$inner.Children.Add($lbl)
+        } else {
+            $cell.Background  = B $C.Panel
+            $cell.BorderBrush = B $C.KeyBorder
+            $cell.Opacity = 0.25
+            [void]$top.Children.Add((New-Keycap ([string]($i + 1)) '' 12))
+            [void]$inner.Children.Add($top)
+        }
+
+        $cell.Child = $inner
+        [System.Windows.Controls.Grid]::SetRow($cell, [int](($rows - 1) - [Math]::Floor($i / 3)))
+        [System.Windows.Controls.Grid]::SetColumn($cell, [int]($i % 3))
+        [void]$grid.Children.Add($cell)
+    }
+
+    $keys = if ($script:LM_Multi) {
+        @('1-9','mark','Enter','done','Arrows','move','Esc','back','Del','close')
+    } else {
+        @('1-9','select','Enter','select','Arrows','move','Esc','back','Del','close')
+    }
+    Show-Frame -crumb (Get-Crumb) -body $grid -preview @('Note', (Get-PreviewNote)) -keys $keys -accent $accent
+}
+
+function Process-ListKey([string]$k) {
+    $count = $script:LM_Options.Count
+    if ($count -eq 0) { return $null }
+    $shift = ([System.Windows.Input.Keyboard]::Modifiers -band [System.Windows.Input.ModifierKeys]::Shift) -ne 0
+
+    $h = $script:LM_Highlight
+    if ($k -eq 'Up')    { if ($h + 3 -lt $count) { $script:LM_Highlight = $h + 3 }; Draw-List; return $null }
+    if ($k -eq 'Down')  { if ($h - 3 -ge 0)      { $script:LM_Highlight = $h - 3 }; Draw-List; return $null }
+    if ($k -eq 'Right') { if (($h % 3) -lt 2 -and ($h + 1) -lt $count) { $script:LM_Highlight = $h + 1 }; Draw-List; return $null }
+    if ($k -eq 'Left')  { if (($h % 3) -gt 0) { $script:LM_Highlight = $h - 1 }; Draw-List; return $null }
+    if ($k -eq 'Tab' -and -not $shift) {
+        $script:LM_Highlight = ($h + 1) % $count; Draw-List; return $null
+    }
+    if ($k -eq 'Tab' -and $shift) {
+        $script:LM_Highlight = ($h - 1 + $count) % $count; Draw-List; return $null
+    }
+    if ($k -eq 'Space') {
+        if ($script:LM_Multi) {
+            if ($script:LM_Selected.Contains($script:LM_Highlight)) { [void]$script:LM_Selected.Remove($script:LM_Highlight) }
+            else { [void]$script:LM_Selected.Add($script:LM_Highlight) }
+            Draw-List
+        }
+        return $null
+    }
+    if ($k -eq 'Return' -or $k -eq 'Enter') {
+        if ($script:LM_Multi) {
+
+            if ($script:LM_Selected.Count -eq 0) { [void]$script:LM_Selected.Add($script:LM_Highlight) }
+            return ,@($script:LM_Selected | Sort-Object | ForEach-Object { $script:LM_Options[$_] })
+        }
+        return $script:LM_Options[$script:LM_Highlight]
+    }
+    if ($k -eq 'Escape' -or $k -eq 'Home') { return 'BACK' }
+    if ($k -match '^(D|NumPad)([1-9])$') {
+        $n = [int]$Matches[2] - 1
+        if ($n -lt $count) {
+            if ($script:LM_Multi) {
+                $script:LM_Highlight = $n
+                if ($script:LM_Selected.Contains($n)) { [void]$script:LM_Selected.Remove($n) } else { [void]$script:LM_Selected.Add($n) }
+                Draw-List
+                return $null
+            }
+            return $script:LM_Options[$n]
+        }
+    }
+    return $null
+}
+
+function Key-List([string]$k) {
+    $result = Process-ListKey $k
+    if ($null -eq $result) { return }
+
+    if ($result -is [string] -and $result -eq 'BACK') {
+        if ($script:ListCtx -eq 'issue') { Show-Nivel1 } else { Enter-IssueMenu }
+        return
+    }
+
+    switch ($script:ListCtx) {
+        'issue' {
+            if ($result -is [array]) {
+                # F2: lista multi -- los issues 'none' se agregan todos de
+                # una vez; los que piden algo mas (texto / razones) se abren
+                # uno por uno y al final se va a confirmar.
+                $script:PendientesIssue = New-Object System.Collections.Generic.List[object]
+                foreach ($lbl in $result) {
+                    $iss = Get-Issues | Where-Object { $_.Label -eq $lbl } | Select-Object -First 1
+                    if (-not $iss) { continue }
+                    if ($iss.Sub -eq 'none') { Agregar-Fijo $iss.Tag }
+                    else { $script:PendientesIssue.Add($iss) }
+                }
+                Siguiente-Pendiente
+                return
+            }
+            $script:CurrentIssue = Get-Issues | Where-Object { $_.Label -eq $result } | Select-Object -First 1
+            switch ($script:CurrentIssue.Sub) {
+                'none'   { Agregar-Fijo $script:CurrentIssue.Tag; Enter-Confirm }
+                'multi'  { Enter-List $script:CurrentIssue.SubList $true 'multi-tag' }
+                'reason' { Enter-List $script:CurrentIssue.SubList $true 'issue-reason' }
+                'pro'    { $lista = if ($script:CurrentIssue.SubList) { $script:CurrentIssue.SubList } else { $Campos }; Enter-List $lista $true 'pro-fields' }
+                'text'   { Enter-FreeText $script:CurrentIssue }
+            }
+        }
+        'multi-tag' {
+            $full = $script:CurrentIssue.Full
+            $tag  = $script:CurrentIssue.Tag
+            if ($full -and ($result -contains $full)) { Agregar-Fijo $full }
+            else {
+                # 8 = invalid city: va SOLA (no se combina con lo demas marcado)
+                if ($result -contains 'invalid city') { Agregar-Fijo "invalid $tag city and zip per usps email it to tac" }
+                else { Agregar-Issue $tag '-' $result }
+            }
+            Siguiente-Pendiente
+        }
+        'issue-reason' {
+            # missing page: multi-seleccion (numpad para marcar, Enter).
+            # Las razones van despues de "missing page" con espacio, separadas
+            # por coma: missing page with breakdown,po
+            # El renglon "missing page" solo = la nota sin razon; si se marca
+            # junto con otras, se ignora (para no repetir missing page).
+            $tagR = $script:CurrentIssue.Tag
+            Agregar-Issue $tagR ' ' @($result | Where-Object { $_ -ne $tagR })
+            Siguiente-Pendiente
+        }
+        'pro-fields' {
+            Agregar-Issue $script:CurrentIssue.Tag ' ' $result     # pro sticker bol,po
+            Siguiente-Pendiente
+        }
+    }
+}
+
+# Agrega un issue a la nota SIN repetirlo: si ese issue ya estaba (lo
+# volviste a agregar), junta los detalles en la misma parte de la nota.
+#   missing page with breakdown  +  missing page po  ->  missing page with breakdown,po
+#   shpr-name  +  shpr-zip  ->  shpr-name,zip
+function Agregar-Issue([string]$tag, [string]$sep, [string[]]$detalles) {
+    $detalles = @($detalles | Where-Object { $_ })
+    for ($i = 0; $i -lt $script:Basket.Count; $i++) {
+        $b = $script:Basket[$i]
+        if ($b -eq $tag) {
+            if ($detalles.Count) { $script:Basket[$i] = $tag + $sep + ($detalles -join ',') }
+            return
+        }
+        if ($b.StartsWith($tag + $sep)) {
+            $ya = @($b.Substring(($tag + $sep).Length) -split ',')
+            $nuevos = @($detalles | Where-Object { $ya -notcontains $_ })
+            if ($nuevos.Count) { $script:Basket[$i] = $b + ',' + ($nuevos -join ',') }
+            return
+        }
+    }
+    if ($detalles.Count) { $script:Basket.Add($tag + $sep + ($detalles -join ',')) }
+    else { $script:Basket.Add($tag) }
+}
+# Agrega un texto fijo a la nota solo si no estaba ya
+function Agregar-Fijo([string]$texto) {
+    if (-not $script:Basket.Contains($texto)) { $script:Basket.Add($texto) }
+}
+
+# F2 (varios issues marcados a la vez): abre uno por uno los que piden algo
+# mas (texto o lista de razones). Cuando ya no queda ninguno, va a confirmar.
+$script:PendientesIssue = $null
+function Siguiente-Pendiente {
+    while ($script:PendientesIssue -and $script:PendientesIssue.Count -gt 0) {
+        $iss = $script:PendientesIssue[0]
+        $script:PendientesIssue.RemoveAt(0)
+        $script:CurrentIssue = $iss
+        switch ($iss.Sub) {
+            'text'   { Enter-FreeText $iss; return }
+            'reason' { Enter-List $iss.SubList $true 'issue-reason'; return }
+            'multi'  { Enter-List $iss.SubList $true 'multi-tag'; return }
+            'pro'    { $lista = if ($iss.SubList) { $iss.SubList } else { $Campos }; Enter-List $lista $true 'pro-fields'; return }
+        }
+    }
+    Enter-Confirm
+}
+
+function Test-NeedsHold {
+    if ($script:CurrentForce -ne 'f1') { return $true }
+    return [bool]($script:Basket | Where-Object { $_ -match '^(cons|no consignee info|invalid cons)' })
+}
+
+function New-AvisoProhibido {
+    $b = New-Object System.Windows.Controls.Border
+    $b.Background = B '#33E5484D'
+    $b.BorderBrush = B '#E5484D'
+    $b.BorderThickness = '2'
+    $b.CornerRadius = '8'
+    $b.Padding = '12,10,12,10'
+    $b.Margin = '0,0,0,10'
+    $t = New-Text 'PROHIBITED: USE THE CURRENT TERMINAL (NOT THE ORIGIN ONE)' 17 '#FF6B6E' 'Bold'
+    $t.TextAlignment = 'Center'
+    $t.HorizontalAlignment = 'Center'
+    $b.Child = $t
+    return $b
+}
+
+function Enter-Confirm {
+    $script:State = 'confirm'
+    $accent = Get-Accent
+    $hold = Test-NeedsHold
+
+    $body = New-Object System.Windows.Controls.StackPanel
+    if ($script:CurrentForce -eq 'haz' -and ($script:Basket | Where-Object { $_ -match '^prohibited' })) {
+        [void]$body.Children.Add((New-AvisoProhibido))
+    }
+    if ($script:Basket.Count -eq 0) {
+        [void]$body.Children.Add((New-Text '(no issues)' 14 $C.Dim))
+    }
+    for ($i = 0; $i -lt $script:Basket.Count; $i++) {
+        $line = New-Object System.Windows.Controls.StackPanel
+        $line.Orientation = 'Horizontal'
+        $line.Margin = '0,1,0,1'
+        $n = New-Text "$($i + 1)." 14 $C.Dim
+        $n.Width = 22
+        [void]$line.Children.Add($n)
+        [void]$line.Children.Add((New-Text $script:Basket[$i] 15))
+        [void]$body.Children.Add($line)
+    }
+    $hl = if ($hold) { New-Text 'Hold: Enter = ERP note, then terminal' 12 $accent 'SemiBold' }
+          else       { New-Text 'No hold: Enter = note' 12 $C.Dim }
+    $hl.Margin = '0,10,0,0'
+    [void]$body.Children.Add($hl)
+
+    $keys = @('Enter', 'ERP note', 'Insert','add another','Esc','remove last','Del','close')
+    Show-Frame -crumb ((Get-ForceLabel) + $SEP + 'review') -body $body -preview @('ERP note', (Get-PreviewNote)) -keys $keys -accent $accent
+}
+
+function Key-Confirm([string]$k) {
+    if ($k -eq 'Return' -or $k -eq 'Enter') {
+        if ($script:Basket.Count -eq 0) { Enter-IssueMenu; return }
+        $n = Get-NotaERP
+        if (Test-NeedsHold) { Finish-Notes $n $n $false '' $true $true }
+        else { Finish-Notes $n $n $true '' $false $true }
+        if ($FlujoAutomatico -and $UsarBotonesMotor) { Start-FlujoAuto }
+        return
+    }
+    if ($k -match '^(Insert|A|Add)$') { Enter-IssueMenu; return }
+    if ($k -eq 'Escape' -or $k -eq 'Home') {
+        if ($script:Basket.Count -gt 0) { $script:Basket.RemoveAt($script:Basket.Count - 1) }
+        Enter-IssueMenu
+    }
+}
+
+function Enter-Terminal {
+    # El overlay ya se cerro (quick-close) despues de copiar la nota ERP,
+    # asi que Basket/CurrentForce ya se limpiaron -- se usa lo que Finish-Notes
+    # guardo en $script:PendingErpNote / $script:PendingForce. Si por algo
+    # llegamos aqui sin eso (p.ej. fallo el portapapeles y el overlay
+    # nunca se cerro), recae en el calculo de siempre.
+    if ($script:PendingForce) { $script:CurrentForce = $script:PendingForce }
+    $script:TermDigits = ''
+    $script:NotaERP = if ($script:PendingErpNote) { $script:PendingErpNote }
+                      elseif ($script:CurrentForce -eq 'hold') { '' }
+                      else { Get-NotaERP }
+    $script:State = 'terminal'
+    Draw-Terminal
+}
+
+function Get-NotaIntra([string]$term) {
+    $base = $HoldText -replace 'xxx', $term
+    if ($script:NotaERP) { return "$base $($script:NotaERP)" }
+    return "$base "
+}
+
+function Draw-Terminal {
+    $accent = Get-Accent
+    $body = New-Object System.Windows.Controls.StackPanel
+    if ($script:CurrentForce -eq 'haz' -and $script:NotaERP -match 'prohibited') {
+        [void]$body.Children.Add((New-AvisoProhibido))
+    }
+    [void]$body.Children.Add((New-Text 'Terminal' 11 $C.Dim))
+
+    $boxes = New-Object System.Windows.Controls.StackPanel
+    $boxes.Orientation = 'Horizontal'
+    $boxes.Margin = '0,6,0,0'
+    for ($i = 0; $i -lt 3; $i++) {
+        $d = if ($i -lt $script:TermDigits.Length) { [string]$script:TermDigits[$i] } else { '' }
+        $cur = ($i -eq $script:TermDigits.Length)
+        $bx = New-Object System.Windows.Controls.Border
+        $bx.Width = 52; $bx.Height = 60
+        $bx.Margin = '0,0,8,0'
+        $bx.CornerRadius = '8'
+        $bx.Background = B $C.Panel
+        $bx.BorderThickness = '2'
+        $bx.BorderBrush = B $(if ($cur -or $d) { $accent } else { $C.KeyBorder })
+        $tx = New-Text $d 28 $accent 'Bold'
+        $tx.HorizontalAlignment = 'Center'
+        $bx.Child = $tx
+        [void]$boxes.Children.Add($bx)
+    }
+    [void]$body.Children.Add($boxes)
+
+    $t = if ($script:TermDigits) { $script:TermDigits } else { '___' }
+    $preview = if ($script:NotaERP) { @('Intra', (Get-NotaIntra $t), 'ERP', $script:NotaERP) }
+               else                 { @('Intra', (Get-NotaIntra $t)) }
+
+    Show-Frame -crumb ((Get-ForceLabel) + $SEP + 'terminal') -body $body -preview $preview `
+        -keys @('0-9','terminal','Backspace','delete','Enter','copy','Esc','back','Del','close') -accent $accent
+}
+
+function Key-Terminal([string]$k) {
+    if ($k -match '^(D|NumPad)([0-9])$') {
+        if ($script:TermDigits.Length -lt 3) { $script:TermDigits += $Matches[2] }
+        Draw-Terminal; return
+    }
+    if ($k -eq 'Back') {
+        if ($script:TermDigits.Length -gt 0) { $script:TermDigits = $script:TermDigits.Substring(0, $script:TermDigits.Length - 1) }
+        Draw-Terminal; return
+    }
+    if ($k -eq 'Return' -or $k -eq 'Enter') {
+        if ($script:TermDigits.Length -gt 0) {
+            Finish-Notes (Get-NotaIntra $script:TermDigits) $script:NotaERP $true $script:TermDigits $false $true
+            if ($script:AutoTrasTerminal) { Start-AutoTrasTerminal }
+        }
+        return
+    }
+    if ($k -eq 'Escape' -or $k -eq 'Home') {
+        # Si llegamos aqui reabriendo con Insert (overlay ya cerrado tras
+        # copiar la nota ERP), la canasta ya se vacio -- Enter-Confirm se
+        # veria vacio ("sin issues"), asi que regresamos a elegir tipo.
+        $script:AutoTrasTerminal = $false
+        Usuario-Fin 'terminal cancelada'
+        Cerrar-LogTiempos 'CANCELADO en la terminal'
+        if ($script:CurrentForce -eq 'hold' -or $script:Basket.Count -eq 0) { Show-Nivel1 } else { Enter-Confirm }
+    }
+}
+
+function Enter-FreeText($issue) {
+    $script:FreeTextIssue = $issue
+    $script:FreeText = ''
+    $script:FreeTextBox = $null
+    $script:State = 'freetext'
+    Draw-FreeText
+}
+
+function Draw-FreeText {
+    $accent = Get-Accent
+    $body = New-Object System.Windows.Controls.StackPanel
+    [void]$body.Children.Add((New-Text $script:FreeTextIssue.Prompt 11 $C.Dim))
+
+    $tb = New-Object System.Windows.Controls.TextBox
+    $tb.Margin = '0,8,0,0'
+    $tb.FontSize = 18
+    $tb.FontFamily = 'Consolas'
+    $tb.Background = B $C.Panel
+    $tb.Foreground = B $C.Text
+    $tb.CaretBrush = B $C.Text
+    $tb.BorderBrush = B $accent
+    $tb.BorderThickness = '2'
+    $tb.Padding = '8,6,8,6'
+    $tb.CharacterCasing = 'Upper'
+    $tb.Text = $script:FreeText
+    $tb.MaxLength = 60
+    [void]$body.Children.Add($tb)
+    $script:FreeTextBox = $tb
+
+    $previewLbl = New-Text '' 12 $C.Dim
+    $previewLbl.Margin = '0,10,0,0'
+    $previewLbl.FontFamily = 'Consolas'
+    [void]$body.Children.Add($previewLbl)
+
+    $tag = $script:FreeTextIssue.Tag
+    $sep = if ($script:FreeTextIssue.Sep) { $script:FreeTextIssue.Sep } else { '-' }
+    $refreshPreview = {
+        $texto = if ($tb.Text) { $tb.Text } else { '...' }
+        $previewLbl.Text = ("Note: $tag$sep$texto").ToUpper()
+    }.GetNewClosure()
+    & $refreshPreview
+
+    $tb.Add_TextChanged({
+        $script:FreeText = $tb.Text
+        & $refreshPreview
+    }.GetNewClosure())
+
+    Show-Frame -crumb ((Get-ForceLabel) + $SEP + $script:FreeTextIssue.Label) -body $body -preview $null `
+        -keys @('Enter','confirm','Esc','cancel') -accent $accent
+
+    $tb.Focus() | Out-Null
+    [System.Windows.Input.Keyboard]::Focus($tb) | Out-Null
+}
+
+function Key-FreeText([string]$k) {
+    if ($k -eq 'Return' -or $k -eq 'Enter') {
+        $raw = if ($script:FreeTextBox) { $script:FreeTextBox.Text } else { $script:FreeText }
+        $texto = ('' + $raw).Trim()
+        $sep = if ($script:FreeTextIssue.Sep) { $script:FreeTextIssue.Sep } else { '-' }
+        if ($texto) { Agregar-Issue $script:FreeTextIssue.Tag $sep @($texto) }
+        Siguiente-Pendiente
+        return
+    }
+    if ($k -eq 'Escape' -or $k -eq 'Home') {
+        Enter-IssueMenu
+    }
+}
+
+function Enter-UpperTool {
+    $script:State = 'upper'
+    Draw-UpperTool
+}
+
+function Draw-UpperTool {
+    $accent = $C.Dim
+    $body = New-Object System.Windows.Controls.StackPanel
+    [void]$body.Children.Add((New-Text 'Paste the text (Ctrl+V). It turns to uppercase by itself. Copy what you need (Ctrl+C).' 11 $C.Dim))
+
+    $tb = New-Object System.Windows.Controls.TextBox
+    $tb.Margin = '0,8,0,0'
+    $tb.FontSize = 14
+    $tb.FontFamily = 'Consolas'
+    $tb.Background = B $C.Panel
+    $tb.Foreground = B $C.Text
+    $tb.CaretBrush = B $C.Text
+    $tb.BorderBrush = B $accent
+    $tb.BorderThickness = '2'
+    $tb.Padding = '8,6,8,6'
+    $tb.CharacterCasing = 'Upper'
+    $tb.AcceptsReturn = $true
+    $tb.AcceptsTab = $true
+    $tb.TextWrapping = 'Wrap'
+    $tb.VerticalScrollBarVisibility = 'Auto'
+    $tb.Height = 220
+    [void]$body.Children.Add($tb)
+
+    Show-Frame -crumb 'Uppercase' -body $body -preview $null `
+        -keys @('Ctrl+V','paste','Ctrl+C','copy','Esc','back') -accent $accent
+
+    $tb.Focus() | Out-Null
+    [System.Windows.Input.Keyboard]::Focus($tb) | Out-Null
+}
+
+
+function Set-Clip([string]$t) {
+    $t = $t.ToUpper()
+    for ($i = 0; $i -lt 6; $i++) {
+        try {
+            [System.Windows.Clipboard]::SetText($t)
+            return $true
+        } catch {
+            Start-Sleep -Milliseconds 50
+        }
+    }
+    return $false
+}
+
+function Add-History([string]$intra, [string]$erp, [string]$forceType, [string]$terminal) {
+    $label = if ($erp -and $intra -ne $erp) { $erp } else { $intra }
+    $item = [PSCustomObject]@{ Intra = $intra; Erp = $erp; Label = $label; Force = $forceType; Terminal = $terminal }
+    $script:History.Insert(0, $item)
+    while ($script:History.Count -gt 3) { $script:History.RemoveAt($script:History.Count - 1) }
+}
+
+$script:DoneIntra   = ''
+$script:DoneErp     = ''
+$script:DoneMsg     = ''
+
+$script:PendingHold = $false
+
+function Draw-Done {
+    $accent = Get-Accent
+    $body = New-Object System.Windows.Controls.StackPanel
+    [void]$body.Children.Add((New-Text 'Copied' 18 $accent 'Bold'))
+
+    if ($script:NotePair.Count -eq 2) {
+        $activo = if ($script:NoteIdx -eq 0) { 'Intra / Hold' } else { 'ERP' }
+        $h = New-Text "On clipboard: $activo  (Insert switches)" 12 $accent 'SemiBold'
+        $h.Margin = '0,4,0,0'
+        [void]$body.Children.Add($h)
+    } elseif ($script:PendingHold) {
+        $h = New-Text 'On clipboard: ERP  (Insert = enter terminal and copy hold)' 12 $accent 'SemiBold'
+        $h.Margin = '0,4,0,0'
+        [void]$body.Children.Add($h)
+    }
+    if ($script:DoneMsg) {
+        $m = New-Text $script:DoneMsg 12 $accent 'SemiBold'
+        $m.Margin = '0,4,0,0'
+        [void]$body.Children.Add($m)
+    }
+
+    $preview =
+        if ($script:NotePair.Count -eq 2) {
+            if ($script:NoteIdx -eq 0) { @("$([char]0x25B8) Intra / Hold", $script:DoneIntra, 'ERP', $script:DoneErp) }
+            else                       { @('Intra / Hold', $script:DoneIntra, "$([char]0x25B8) ERP", $script:DoneErp) }
+        } elseif ($script:DoneErp) { @('Intra and ERP note', $script:DoneIntra) }
+        else                       { @('Intra (complete the reason)', $script:DoneIntra) }
+
+    $doneKeys = New-Object System.Collections.Generic.List[string]
+    $doneKeys.Add('1'); $doneKeys.Add($(if ($script:PendingHold) { 'copy erp' } else { 'copy intra/hold' }))
+    if ($script:NotePair.Count -eq 2) {
+        $doneKeys.Add('2'); $doneKeys.Add('copy erp')
+        $doneKeys.Add('Insert'); $doneKeys.Add('switch')
+    } elseif ($script:PendingHold) {
+        $doneKeys.Add('Insert'); $doneKeys.Add('terminal / hold')
+    }
+    $doneKeys.Add('Del'); $doneKeys.Add('close')
+
+    Show-Frame -crumb ((Get-ForceLabel) + $SEP + 'done') -body $body -preview $preview -keys $doneKeys.ToArray() -accent $accent
+}
+
+function Finish-Notes([string]$intra, [string]$erp, [bool]$addToHistory = $true, [string]$terminal = '', [bool]$pendingHold = $false, [bool]$quickClose = $false) {
+    # Guarda las notas para los botones del motor (ERP / INTRA)
+    try { Set-NotasBotones $intra $erp $pendingHold $terminal } catch { }
+    $script:LastCopied  = $intra
+    $script:PendingHold = $pendingHold
+    if ($erp -and $intra -ne $erp) {
+        $script:NotePair = @($intra, $erp)
+        $script:NoteIdx  = 0
+    } else {
+        $script:NotePair = @()
+    }
+    $copiado = Set-Clip $intra
+    if ($addToHistory) { Add-History $intra $erp $script:CurrentForce $terminal }
+
+    $msg = ''
+    if (-not $copiado) { $msg = 'Could not copy (clipboard busy) -- press 1 to retry' }
+
+    $script:DoneIntra = $intra
+    $script:DoneErp   = $erp
+    $script:DoneMsg   = $msg
+    $script:State     = 'done'
+
+    # Se cierra solo al copiar (con o sin hold) para no estorbar la
+    # pantalla. Si es un paso de hold (ERP o intra/hold), se prende la
+    # marca de agua chica arriba al centro para saber cual nota quedo en
+    # el portapapeles. Si el portapapeles fallo (hay mensaje),
+    # se deja la pantalla "listo" para que el usuario vea el aviso.
+    if ($quickClose -and $copiado -and -not $msg) {
+        if (($pendingHold -or $terminal) -and -not $FlujoAutomatico) {
+            $script:WatermarkAccent = Get-Accent
+            Show-Watermark $(if ($pendingHold) { 'ERP' } else { 'INTRA' })
+        }
+        if ($pendingHold) {
+            # Basket y CurrentForce se van a limpiar en Close-Menu -- se
+            # guarda aparte lo que Enter-Terminal va a necesitar cuando el
+            # usuario le de Insert mas tarde (con el overlay ya cerrado).
+            $script:PendingErpNote = $erp
+            $script:PendingForce   = $script:CurrentForce
+        } else {
+            $script:PendingErpNote = ''
+            $script:PendingForce   = $null
+        }
+        Close-Menu
+        if ($pendingHold) { $script:PendingHold = $true }
+        return
+    }
+
+    Draw-Done
+
+    if ($pendingHold) { return }
+
+    $t = New-Object System.Windows.Threading.DispatcherTimer
+    $t.Interval = [TimeSpan]::FromMilliseconds(30000)
+    $t.Add_Tick({
+        param($s, $e)
+        $s.Stop()
+        if ($script:State -eq 'done') { Close-Menu }
+    })
+    $t.Start()
+}
+
+function Copy-FromHistory([int]$idx) {
+    if ($idx -lt 0 -or $idx -ge $script:History.Count) { return }
+    $item = $script:History[$idx]
+    $script:CurrentForce = $item.Force
+    Finish-Notes $item.Intra $item.Erp $false $item.Terminal $false $true
+}
+
+$script:PrevForegroundHwnd = [IntPtr]::Zero
+
+function Save-PrevForeground {
+    $script:PrevForegroundHwnd = [LocalKeyState]::GetForeground()
+}
+
+function Close-Menu {
+    $script:Basket.Clear()
+    $script:CurrentForce = $null
+    $script:PendingHold  = $false
+    $script:State = 'hidden'
+    $Win.Visibility = 'Hidden'
+    if ($script:PrevForegroundHwnd -ne [IntPtr]::Zero) {
+        [LocalKeyState]::ForceForeground($script:PrevForegroundHwnd)
+        $script:PrevForegroundHwnd = [IntPtr]::Zero
+    }
+}
+
+function Set-MenuFocus {
+    $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($Win)).Handle
+
+    [LocalKeyState]::HideFromAltTab($hwnd)
+    [LocalKeyState]::ForceForeground($hwnd)
+    $Win.Activate() | Out-Null
+    $Win.Focus() | Out-Null
+    [System.Windows.Input.Keyboard]::Focus($Win) | Out-Null
+}
+
+function Open-Menu {
+    if ($Win.Visibility -eq 'Visible') { return }
+    Hide-Watermark
+    Save-PrevForeground
+    $Win.Visibility = 'Visible'
+    Set-MenuFocus
+    Show-Nivel1
+
+    $retry = New-Object System.Windows.Threading.DispatcherTimer
+    $retry.Interval = [TimeSpan]::FromMilliseconds(120)
+    $retry.Add_Tick({
+        param($s, $e)
+        $s.Stop()
+        if ($Win.Visibility -eq 'Visible') { Set-MenuFocus }
+    })
+    $retry.Start()
+}
+
+function Key-Nivel1([string]$k) {
+    if ($k -match '^(Left|D1|NumPad1)$')  { Select-Nivel1 'f1';  return }
+    if ($k -match '^(Right|D2|NumPad2)$') { Select-Nivel1 'haz'; return }
+    if ($k -match '^(D3|NumPad3)$' -and $script:History.Count -ge 1) { Copy-FromHistory 0; return }
+    if ($k -match '^(D4|NumPad4)$' -and $script:History.Count -ge 2) { Copy-FromHistory 1; return }
+    if ($k -match '^(D5|NumPad5)$' -and $script:History.Count -ge 3) { Copy-FromHistory 2; return }
+    if ($k -eq 'P') { Close-MenuParaBoton; Medir-Punto; return }   # medir coordenada (5 s)
+    if ($k -eq 'M') { Enter-UpperTool; return }
+    if ($k -eq 'Escape') { Close-Menu }
+}
+
+function Key-Done([string]$k) {
+    if ($k -match '^(D1|NumPad1)$') {
+        $script:NoteIdx = 0
+        Set-Clip $script:LastCopied
+        if ($script:NotePair.Count -eq 2) { Draw-Done }
+        return
+    }
+    if ($k -match '^(D2|NumPad2)$' -and $script:NotePair.Count -eq 2) {
+        $script:NoteIdx = 1
+        Set-Clip $script:NotePair[1]
+        Draw-Done
+        return
+    }
+
+}
+
+function Handle-KeyDown {
+    param($s, $e)
+    if ($script:State -eq 'hidden') { return }
+    $k = $e.Key.ToString()
+
+    if ($script:State -eq 'freetext') {
+        if ($k -eq 'Return' -or $k -eq 'Enter' -or $k -eq 'Escape' -or $k -eq 'Home') {
+            $e.Handled = $true
+            try { Key-FreeText $k } catch { Show-Flag "Free text ($k)" $_.Exception.Message }
+        }
+        return
+    }
+
+    if ($script:State -eq 'upper') {
+        if ($k -eq 'Escape' -or $k -eq 'Home') {
+            $e.Handled = $true
+            try { Show-Nivel1 } catch { Show-Flag 'Tool M' $_.Exception.Message }
+        }
+        return
+    }
+
+    $e.Handled = $true
+
+    try {
+        switch ($script:State) {
+            'nivel1'   { Key-Nivel1 $k }
+            'list'     { Key-List $k }
+            'confirm'  { Key-Confirm $k }
+            'terminal' { Key-Terminal $k }
+            'done'     { Key-Done $k }
+        }
+    } catch { Show-Flag "Key $k on screen $($script:State)" $_.Exception.Message }
+}
+
+$Win.Add_KeyDown({ param($s, $e) Handle-KeyDown $s $e })
+
+$VK_DELETE = 0x2E
+$VK_INSERT = 0x2D
+
+$script:DelArmed = $true
+$script:InsArmed = $true
+$script:RePagArmed = $true
+$script:AuditArmed = $true
+$hotkeyTimer = New-Object System.Windows.Threading.DispatcherTimer
+$hotkeyTimer.Interval = [TimeSpan]::FromMilliseconds(20)   # 20 ms: no se pierde un Enter rapido
+$hotkeyTimer.Add_Tick({
+    $del = ([LocalKeyState]::GetAsyncKeyState($VK_DELETE) -band 0x8000) -ne 0
+    $ins = ([LocalKeyState]::GetAsyncKeyState($VK_INSERT) -band 0x8000) -ne 0
+    $delEdge = $del -and $script:DelArmed
+    $insEdge = $ins -and $script:InsArmed
+    $script:DelArmed = -not $del
+    $script:InsArmed = -not $ins
+    $mods = @(0x10, 0x11, 0x12) | Where-Object { ([LocalKeyState]::GetAsyncKeyState($_) -band 0x8000) -ne 0 }
+    # Ctrl (izq) + Flecha abajo = secuencia audit (sin Shift/Alt)
+    $auK = (([LocalKeyState]::GetAsyncKeyState(0xA2) -band 0x8000) -ne 0) -and
+           (([LocalKeyState]::GetAsyncKeyState(0x28) -band 0x8000) -ne 0)
+    $auEdge = $auK -and $script:AuditArmed
+    $script:AuditArmed = -not $auK
+    $sinShiftAlt = -not ((([LocalKeyState]::GetAsyncKeyState(0x10) -band 0x8000) -ne 0) -or
+                         (([LocalKeyState]::GetAsyncKeyState(0x12) -band 0x8000) -ne 0))
+    if ($auEdge -and $sinShiftAlt -and -not $script:AuditActivo) {
+        # Switch AUDIT apagado: no hace nada (solo avisa)
+        $script:AuditArmed = $false
+        $acentoPrevio = $script:WatermarkAccent
+        $script:WatermarkAccent = $C.Dim
+        Show-Watermark 'AUDIT' 'AUDIT IS OFF (OPEN THE MENU AND TURN IT ON)' 1500
+        $script:WatermarkAccent = $acentoPrevio
+        return
+    }
+    if ($auEdge -and $sinShiftAlt -and $UsarBotonesMotor -and $script:State -eq 'hidden' -and -not $script:MotorCorriendo) {
+        # Espera a que sueltes el Ctrl (si no, el Esc saldria como Ctrl+Esc)
+        $t = 0
+        while ((([LocalKeyState]::GetAsyncKeyState(0xA2) -band 0x8000) -ne 0) -and $t -lt 2000) { Start-Sleep -Milliseconds 20; $t += 20 }
+        if ((([LocalKeyState]::GetAsyncKeyState(0xA2) -band 0x8000) -ne 0)) { Show-Flag 'Audit' 'release Ctrl to start'; return }
+        if (-not $script:MotorOK) { Show-Flag 'Audit' $script:MotorError; return }
+        $script:MotorCorriendo = $true
+        try { Hide-Watermark; Invoke-SecuenciaAudit | Out-Null }
+        catch { Show-Flag 'Audit' $_.Exception.Message }
+        finally { $script:MotorCorriendo = $false; $script:AuditArmed = $false }
+        return
+    }
+    # Ctrl + Insert = solo PRO lookup F1 / Ctrl + RePag = solo PRO lookup F2 (sin notas)
+    $ctrlK = ([LocalKeyState]::GetAsyncKeyState(0x11) -band 0x8000) -ne 0
+    $repag = ([LocalKeyState]::GetAsyncKeyState(0x21) -band 0x8000) -ne 0
+    $repagEdge = $repag -and $script:RePagArmed
+    $script:RePagArmed = -not $repag
+    $f1Edge = $insEdge -and $ctrlK
+    $f2Edge = $repagEdge -and $ctrlK
+    if (($f1Edge -or $f2Edge) -and $sinShiftAlt -and $UsarBotonesMotor -and $script:State -eq 'hidden' -and
+        -not $script:MotorCorriendo -and -not $script:EsperandoGuardar -and -not $script:AutoTrasTerminal) {
+        # Espera a que sueltes el Ctrl (si no, el doble click / Shift+Fin / Ctrl+C
+        # del PRO saldrian con Ctrl apretado)
+        $t = 0
+        while ((([LocalKeyState]::GetAsyncKeyState(0x11) -band 0x8000) -ne 0) -and $t -lt 2000) { Start-Sleep -Milliseconds 20; $t += 20 }
+        if ((([LocalKeyState]::GetAsyncKeyState(0x11) -band 0x8000) -ne 0)) { Show-Flag 'PRO lookup' 'release Ctrl to start'; return }
+        if (-not $script:MotorOK) { Show-Flag 'PRO lookup' $script:MotorError; return }
+        Invoke-SoloPRO $f2Edge
+        $script:InsArmed = $false
+        $script:RePagArmed = $false
+        return
+    }
+    # Flujo automatico: esperando a que guardes la nota ERP
+    # 0x8001 = apretada ahorita O apretada desde la ultima revision (no se pierde un toque rapido)
+    $oK = ([LocalKeyState]::GetAsyncKeyState(0x4F) -band 0x8001) -ne 0     # tecla O
+    $oEdge = $oK -and $script:OArmed
+    $script:OArmed = -not $oK
+    $enK = ([LocalKeyState]::GetAsyncKeyState(0x0D) -band 0x8001) -ne 0    # Enter (normal o del numpad)
+    $enEdge = $enK -and $script:EnterArmed
+    $script:EnterArmed = -not $enK
+    if ($script:EsperandoGuardar -and $script:State -eq 'hidden') {
+        $altK = ([LocalKeyState]::GetAsyncKeyState(0x12) -band 0x8001) -ne 0
+        try {
+            if ($oEdge -and $altK) {
+                Paso 'Flujo auto: Alt+O detectado (guardaste)'
+                Usuario-Fin 'Alt+O detectado'
+                Start-FlujoFase2 $Global:ForceT.B1_DespuesGuardar
+                return
+            }
+            # Enter solo (sin Ctrl/Shift/Alt; Ctrl+Enter es LAMP PARTS) tambien cuenta como guardar
+            if ($enEdge -and -not $mods) {
+                Paso 'Flujo auto: Enter detectado (guardaste)'
+                Usuario-Fin 'Enter detectado'
+                Start-FlujoFase2 $Global:ForceT.B1_DespuesGuardar
+                return
+            }
+            if ($delEdge) {
+                Stop-FlujoAuto 'canceled with Del'
+                return
+            }
+            if ((Get-Date) -gt $script:EsperaLimite) {
+                Stop-FlujoAuto ("not saved within $($Global:EsperaMaxGuardarMin) min")
+            }
+        } catch { Stop-FlujoAuto $_.Exception.Message }
+    }
+    if ($script:State -eq 'upper') { return }
+    if (-not ($delEdge -or $insEdge)) { return }
+
+    try {
+        if ($delEdge) {
+            if ($script:State -eq 'hidden') { Open-Menu } else { $script:AutoTrasTerminal = $false; Close-Menu }
+        }
+        if ($insEdge -and -not $ctrlK -and $script:PendingHold -and $script:State -eq 'done') {
+            Hide-Watermark
+            if ($script:State -eq 'hidden') {
+                Save-PrevForeground
+                $Win.Visibility = 'Visible'
+                Set-MenuFocus
+            }
+            Enter-Terminal
+        } elseif ($insEdge -and -not $ctrlK -and $script:State -eq 'done') {
+            if ($script:NotePair.Count -eq 2) {
+                $script:NoteIdx = 1 - $script:NoteIdx
+                Set-Clip $script:NotePair[$script:NoteIdx]
+                Show-Watermark $(if ($script:NoteIdx -eq 0) { 'INTRA' } else { 'ERP' })
+                if ($script:State -eq 'done') { Draw-Done }
+            } elseif ($script:LastCopied) {
+                Set-Clip $script:LastCopied
+            }
+        }
+    } catch {
+        Show-Flag $(if ($delEdge) { 'Del' } else { 'Insert' }) $_.Exception.Message
+    }
+})
+$hotkeyTimer.Start()
+
+$WatermarkWin = New-Object System.Windows.Window
+$WatermarkWin.WindowStyle        = 'None'
+$WatermarkWin.AllowsTransparency = $true
+$WatermarkWin.Background         = 'Transparent'
+$WatermarkWin.Topmost            = $true
+$WatermarkWin.ShowInTaskbar      = $false
+$WatermarkWin.ShowActivated      = $false
+$WatermarkWin.ResizeMode         = 'NoResize'
+$WatermarkWin.Width  = 460
+$WatermarkWin.Height = 120
+$WatermarkWin.Visibility = 'Hidden'
+
+$wmScreen = [System.Windows.SystemParameters]::WorkArea
+$WatermarkWin.Left = $wmScreen.Left + (($wmScreen.Width - $WatermarkWin.Width) / 2)
+$WatermarkWin.Top  = $wmScreen.Top + 34
+
+$WatermarkWin.Add_SourceInitialized({
+    param($s, $e)
+    $h = (New-Object System.Windows.Interop.WindowInteropHelper($WatermarkWin)).Handle
+    [LocalKeyState]::HideFromAltTab($h)
+})
+
+$wmStack = New-Object System.Windows.Controls.StackPanel
+$wmStack.HorizontalAlignment = 'Center'
+$wmStack.VerticalAlignment   = 'Top'
+
+$script:WatermarkGhost = New-Object System.Windows.Controls.TextBlock
+$script:WatermarkGhost.Text = 'ERP'
+$script:WatermarkGhost.FontSize = 40
+$script:WatermarkGhost.FontWeight = 'Bold'
+$script:WatermarkGhost.FontFamily = 'Segoe UI'
+$script:WatermarkGhost.Foreground = B $C.F1
+$script:WatermarkGhost.Opacity = 0.22
+$script:WatermarkGhost.HorizontalAlignment = 'Center'
+[void]$wmStack.Children.Add($script:WatermarkGhost)
+
+$script:WatermarkPill = New-Object System.Windows.Controls.Border
+$script:WatermarkPill.Background = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(150, 15, 17, 20))
+$script:WatermarkPill.BorderBrush = B $C.F1
+$script:WatermarkPill.BorderThickness = '1.5'
+$script:WatermarkPill.CornerRadius = '999'
+$script:WatermarkPill.Padding = '14,6,14,6'
+$script:WatermarkPill.Margin = '0,-8,0,0'
+$script:WatermarkPill.HorizontalAlignment = 'Center'
+
+$script:WatermarkLabel = New-Object System.Windows.Controls.TextBlock
+$script:WatermarkLabel.Text = 'ERP NOTE COPIED'
+$script:WatermarkLabel.FontSize = 13
+$script:WatermarkLabel.FontWeight = 'Bold'
+$script:WatermarkLabel.FontFamily = 'Segoe UI'
+$script:WatermarkLabel.Foreground = B '#FFFFFF'
+$script:WatermarkLabel.TextWrapping = 'Wrap'
+$script:WatermarkLabel.TextAlignment = 'Center'
+$script:WatermarkLabel.MaxWidth = 420
+$script:WatermarkPill.Child = $script:WatermarkLabel
+[void]$wmStack.Children.Add($script:WatermarkPill)
+
+# Tiempo de la secuencia F1/F2 (chiquito, abajo del VERIFY), como el del audit
+$script:WatermarkTiempoBox = New-Object System.Windows.Controls.Border
+$script:WatermarkTiempoBox.Background = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(120, 15, 17, 20))
+$script:WatermarkTiempoBox.CornerRadius = '999'
+$script:WatermarkTiempoBox.Padding = '8,1,8,1'
+$script:WatermarkTiempoBox.Margin = '0,3,0,0'
+$script:WatermarkTiempoBox.HorizontalAlignment = 'Center'
+$script:WatermarkTiempoBox.Visibility = 'Collapsed'
+$script:WatermarkTiempo = New-Object System.Windows.Controls.TextBlock
+$script:WatermarkTiempo.FontSize = 10
+$script:WatermarkTiempo.FontWeight = 'SemiBold'
+$script:WatermarkTiempo.FontFamily = 'Segoe UI'
+$script:WatermarkTiempo.Foreground = B '#C9D1D9'
+$script:WatermarkTiempoBox.Child = $script:WatermarkTiempo
+[void]$wmStack.Children.Add($script:WatermarkTiempoBox)
+
+$WatermarkWin.Content = $wmStack
+
+$script:WatermarkTimer = New-Object System.Windows.Threading.DispatcherTimer
+$script:WatermarkTimer.Interval = [TimeSpan]::FromMilliseconds(3000)
+$script:WatermarkTimer.Add_Tick({
+    param($s, $e)
+    $s.Stop()
+    $WatermarkWin.Visibility = 'Hidden'
+})
+
+function Show-Watermark([string]$tipo, [string]$label = '', [int]$ms = 3000) {
+    $accent = if ($script:WatermarkAccent) { $script:WatermarkAccent } else { $C.F1 }
+    $script:WatermarkGhost.Text = $tipo
+    $script:WatermarkGhost.Foreground = B $accent
+    $script:WatermarkPill.BorderBrush = B $accent
+    $script:WatermarkLabel.Text = if ($label) { $label } else { "$tipo NOTE COPIED" }
+    $script:WatermarkTiempoBox.Visibility = 'Collapsed'     # el tiempo solo sale al terminar F1/F2
+    $WatermarkWin.Visibility = 'Visible'
+    $script:WatermarkTimer.Stop()
+    if ($ms -gt 0) {                      # 0 = se queda hasta que otro aviso la cambie
+        $script:WatermarkTimer.Interval = [TimeSpan]::FromMilliseconds($ms)
+        $script:WatermarkTimer.Start()
+    }
+}
+
+# Avisos del flujo (en ingles, solo los que piden algo al usuario):
+#   rojo  WAIT   / DON'T MOVE      -> el motor esta trabajando, no toques nada
+#   verde ENTER  / PRESS ENTER     -> acepta la nota ERP (Enter o Alt+O)
+#   verde VERIFY / VERIFY AND SAVE -> revisa y guarda a mano
+function Show-Aviso([string]$ghost, [string]$label, [string]$color, [int]$ms) {
+    $acentoPrevio = $script:WatermarkAccent
+    $script:WatermarkAccent = $color
+    Show-Watermark $ghost $label $ms
+    $script:WatermarkAccent = $acentoPrevio
+}
+function Show-NoMover   { Show-Aviso 'WAIT'   "DON'T MOVE"      '#E5484D' 0 }
+function Show-Enter     { Show-Aviso 'ENTER'  'PRESS ENTER'     '#3FB950' 0 }
+function Show-Verificar {
+    if ($script:MismoPRO) {
+        # Mismo PRO que la bill anterior: aviso naranja, dura mas
+        Show-Aviso 'CHECK' 'SAME PRO AS THE LAST BILL - VERIFY AND SAVE' '#F29F05' 8000
+    } else {
+        Show-Aviso 'VERIFY' 'VERIFY AND SAVE' '#3FB950' 5000
+    }
+}
+# Tiempo de F1/F2 abajo del VERIFY (solo si el VERIFY / CHECK sigue en pantalla)
+function Show-TiempoFlujo([string]$tipo, [double]$seg) {
+    if ($WatermarkWin.Visibility -ne 'Visible') { return }
+    if ($script:WatermarkGhost.Text -ne 'VERIFY' -and $script:WatermarkGhost.Text -ne 'CHECK') { return }
+    $script:WatermarkTiempo.Text = ('{0} OK IN {1:0.0} S' -f $tipo, $seg)
+    $script:WatermarkTiempoBox.Visibility = 'Visible'
+}
+
+# Quita el DON'T MOVE si quedo puesto (por ejemplo si algo fallo)
+function Hide-NoMover {
+    if ($script:WatermarkGhost.Text -eq 'WAIT') { Hide-Watermark }
+}
+
+function Hide-Watermark {
+    $script:WatermarkTimer.Stop()
+    $WatermarkWin.Visibility = 'Hidden'
+}
+
+function Show-Flag([string]$donde, [string]$que) {
+    $msg = Trunc ($donde + ': ' + $que) 90
+    $script:LastError = (Get-Date -Format 'HH:mm') + ' ' + $msg
+    try {
+        $script:WatermarkGhost.Text = 'ERROR'
+        $script:WatermarkGhost.Foreground = B '#E5484D'
+        $script:WatermarkPill.BorderBrush = B '#E5484D'
+        $script:WatermarkLabel.Text = $msg.ToUpper()
+        $script:WatermarkTiempoBox.Visibility = 'Collapsed'
+        $WatermarkWin.Visibility = 'Visible'
+        $script:WatermarkTimer.Stop()
+        $script:WatermarkTimer.Interval = [TimeSpan]::FromMilliseconds(8000)
+        $script:WatermarkTimer.Start()
+    } catch { }
+}
+
+
+# =====================================================================
+#  BOTONES DEL MOTOR  (PRO lookup / pegar nota ERP / pegar nota intra)
+#  El motor va incluido arriba (#region MOTOR). Un solo archivo.
+# =====================================================================
+#region MOTOR
+# ============================ CONFIGURACION ============================
+
+# ===>  SWITCH DE COORDENADAS  <===
+#   1 = usa coordenadas_mias.txt (si ahi falta un punto, usa el de la lista base)
+#   0 = solo la lista base (abajo)
+$Global:Coord = 1
+
+$Global:ERP_Titulo1 = 'TS Applications'      # pedazos del titulo del Escritorio Remoto
+$Global:ERP_Titulo2 = 'Remote Desktop'
+$Global:PausaMs     = 600                    # pausa por default de Esperar
+$Global:EsperaPROms = 3000                   # PRO lookup: cuanto esperar a que el PRO
+                                             # llegue al portapapeles (el Escritorio
+                                             # Remoto a veces tarda en pasarlo)
+$Global:EsperaPRO1ms = 400                   # 1er intento: cuando sale bien llega en ~25 ms;
+                                             # si en 0.4 s no llego, no se selecciono -> reintento
+$Global:TeclaManoMs = 40                     # reintento del PRO: ms que se deja apretada cada tecla
+$Global:TeclaMano1Ms = 20                    # 1er intento del PRO (mas rapido)
+$Global:EsperaFocoERPms = 500               # espera despues de traer el ERP al frente
+$Global:EsperaMaxGuardarMin = 5            # Flujo auto: si no guardas en estos minutos, se cancela
+
+# ===>  FLAGS DE DIAGNOSTICO  <===
+#   Debug      = 1 muestra cada paso en la ventana negra (con hora)
+#   20t: ya no hay motor_log.txt. El unico archivo es resumen_ultimas.txt
+#   (nunca guarda PROs, terminales ni el texto de las notas)
+$Global:Debug      = 1     # (la consola esta oculta)
+$Global:LogArchivo = 0     # 20t: ya no se escribe motor_log.txt
+
+# ------------------------- COORDENADAS --------------------------------
+# MIAS      = archivo coordenadas_mias.txt (capturar_coords.ps1 o a mano)
+# BASE      = lista de abajo (fijas)
+$Global:ArchivoCoords = Join-Path $PSScriptRoot 'coordenadas_mias.txt'
+
+# Punto = @(X, Y), 'donde poner el mouse'
+$Global:Puntos = [ordered]@{
+    ERP_CampoPRO      = @{ XY = @(18, 60);   Desc = 'ERP: on the PRO of the bill (PRO lookup double-clicks it)' }
+    ERP_Instrucciones = @{ XY = @(20, 768);  Desc = 'ERP: special instructions (before the Alt+A of the force)' }
+    Intra_Nota1       = @{ XY = @(788, 198); Desc = 'INTRA (Edge): button to add a new note' }
+    Intra_Nota2       = @{ XY = @(390, 212); Desc = 'INTRA (Edge): note type field (where the "i" goes)' }
+    Edge_Busqueda1    = @{ XY = @(100, 115); Desc = 'PRO lookup F1 and F2: intra search box where the PRO is pasted' }
+    Edge_Nav1         = @{ XY = @(792, 174); Desc = 'PRO lookup F2: 1st click to go to the old intra (HU status)' }
+    Edge_Nav2         = @{ XY = @(780, 724); Desc = 'PRO lookup F2: 2nd click (old intra)' }
+    Edge_Busqueda2    = @{ XY = @(106, 696); Desc = 'PRO lookup F2: old intra search box' }
+    Inicio_Click      = @{ XY = @(110, 217); Desc = 'ERP: click to give focus before starting any F1/F2 sequence' }
+}
+# ======================================================================
+
+Add-Type -AssemblyName System.Windows.Forms
+
+if (-not ('Motor' -as [type])) {
+Add-Type @"
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public class Motor {
+    [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
+    [DllImport("user32.dll")] static extern void mouse_event(uint f, uint x, uint y, uint d, UIntPtr e);
+    [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte sc, uint f, UIntPtr e);
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")] static extern bool AttachThreadInput(uint a, uint b, bool f);
+    [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int n);
+    [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
+
+    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
+
+    public static void Click(int x, int y) {
+        SetCursorPos(x, y);
+        mouse_event(0x2, 0, 0, 0, UIntPtr.Zero);
+        mouse_event(0x4, 0, 0, 0, UIntPtr.Zero);
+    }
+
+    [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int i);
+    [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr h, int i, int v);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+    [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr h);
+    [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr h, IntPtr dc);
+
+    // ---- Foto de una zona de la pantalla (deteccion por color, velocidad 4) ----
+    // Solo lee pixeles de la pantalla (como una captura), no guarda nada.
+    [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int w, int h);
+    [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr hdc, IntPtr obj);
+    [DllImport("gdi32.dll")] static extern bool BitBlt(IntPtr d, int x, int y, int w, int h, IntPtr s, int sx, int sy, uint rop);
+    [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr obj);
+    [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] static extern int GetDIBits(IntPtr hdc, IntPtr bmp, uint start, uint lines, [Out] int[] bits, ref BMIH bi, uint usage);
+    [StructLayout(LayoutKind.Sequential)] public struct BMIH {
+        public uint biSize; public int biWidth; public int biHeight; public ushort biPlanes; public ushort biBitCount;
+        public uint biCompression; public uint biSizeImage; public int biXPelsPerMeter; public int biYPelsPerMeter;
+        public uint biClrUsed; public uint biClrImportant;
+    }
+    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);
+    // Rectangulo de la ventana al frente: izq, arriba, der, abajo
+    public static int[] RectAlFrente() {
+        RECT r;
+        if (!GetWindowRect(GetForegroundWindow(), out r)) { return null; }
+        return new int[] { r.Left, r.Top, r.Right, r.Bottom };
+    }
+    // Foto de la zona: 1 de cada 'paso' pixeles (en X y en Y), solo el color
+    public static int[] Zona(int x, int y, int w, int h, int paso) {
+        if (w <= 0 || h <= 0 || paso <= 0) { return new int[0]; }
+        IntPtr scr = GetDC(IntPtr.Zero);
+        IntPtr mem = CreateCompatibleDC(scr);
+        IntPtr bmp = CreateCompatibleBitmap(scr, w, h);
+        IntPtr old = SelectObject(mem, bmp);
+        int[] todo = new int[w * h];
+        try {
+            BitBlt(mem, 0, 0, w, h, scr, x, y, 0x00CC0020);
+            SelectObject(mem, old);
+            BMIH bi = new BMIH();
+            bi.biSize = (uint)Marshal.SizeOf(typeof(BMIH));
+            bi.biWidth = w; bi.biHeight = -h; bi.biPlanes = 1; bi.biBitCount = 32; bi.biCompression = 0;
+            GetDIBits(mem, bmp, 0, (uint)h, todo, ref bi, 0);
+        } finally {
+            DeleteObject(bmp);
+            DeleteDC(mem);
+            ReleaseDC(IntPtr.Zero, scr);
+        }
+        int nx = (w + paso - 1) / paso;
+        int ny = (h + paso - 1) / paso;
+        int[] r = new int[nx * ny];
+        int k = 0;
+        for (int yy = 0; yy < h; yy += paso) {
+            for (int xx = 0; xx < w; xx += paso) { r[k++] = todo[yy * w + xx] & 0xFFFFFF; }
+        }
+        return r;
+    }
+    // Que parte (0 a 1) de los pixeles es distinta entre dos fotos (-1 = no se puede)
+    public static double Diferencia(int[] a, int[] b) {
+        if (a == null || b == null || a.Length == 0 || a.Length != b.Length) { return -1; }
+        int n = 0;
+        for (int i = 0; i < a.Length; i++) { if (a[i] != b[i]) { n++; } }
+        return (double)n / a.Length;
+    }
+    // Que parte (0 a 1) de la foto es de UN solo color (1 = zona vacia / en blanco)
+    public static double Uniforme(int[] a) {
+        if (a == null || a.Length == 0) { return 1; }
+        System.Collections.Generic.Dictionary<int, int> c = new System.Collections.Generic.Dictionary<int, int>();
+        int mx = 0;
+        for (int i = 0; i < a.Length; i++) {
+            int n;
+            c.TryGetValue(a[i], out n);
+            n++;
+            c[a[i]] = n;
+            if (n > mx) { mx = n; }
+        }
+        return (double)mx / a.Length;
+    }
+
+
+    // Nombre del proceso de la ventana que tiene el foco (ej. msedge, mstsc)
+    public static string ProcesoAlFrente() {
+        uint pid;
+        GetWindowThreadProcessId(GetForegroundWindow(), out pid);
+        try { return System.Diagnostics.Process.GetProcessById((int)pid).ProcessName.ToLower(); }
+        catch { return ""; }
+    }
+
+    // La ventana no roba el foco al darle click (WS_EX_NOACTIVATE)
+    public static void NoActivate(IntPtr h) {
+        SetWindowLong(h, -20, GetWindowLong(h, -20) | 0x08000000);
+    }
+
+    // Doble click real (los 2 clicks juntos, sin pausa en medio)
+    // Tiempos parecidos a un doble click de mano (el Escritorio Remoto
+    // a veces no reconoce clicks demasiado pegados)
+    public static void DoubleClick(int x, int y) {
+        SetCursorPos(x, y);
+        System.Threading.Thread.Sleep(80);
+        mouse_event(0x2, 0, 0, 0, UIntPtr.Zero);
+        System.Threading.Thread.Sleep(25);
+        mouse_event(0x4, 0, 0, 0, UIntPtr.Zero);
+        System.Threading.Thread.Sleep(90);
+        mouse_event(0x2, 0, 0, 0, UIntPtr.Zero);
+        System.Threading.Thread.Sleep(25);
+        mouse_event(0x4, 0, 0, 0, UIntPtr.Zero);
+    }
+
+    // Tecla "de mano": baja, la deja apretada unos ms y la suelta, con scan code
+    // (el Escritorio Remoto a veces ignora teclas demasiado rapidas o sin scan code)
+    [DllImport("user32.dll")] static extern uint MapVirtualKey(uint code, uint type);
+    public static void TeclaLenta(byte vk, int holdMs) {
+        byte sc = (byte)MapVirtualKey(vk, 0);
+        keybd_event(vk, sc, 0, UIntPtr.Zero);
+        System.Threading.Thread.Sleep(holdMs);
+        keybd_event(vk, sc, 2, UIntPtr.Zero);
+    }
+    // Combinacion "de mano" (ej. Shift+Fin, Ctrl+C): aprieta el modificador, luego
+    // la tecla, y suelta, con scan code y pausas. ext = tecla extendida (Inicio,
+    // Fin): sin eso el Escritorio Remoto la tomaria como del teclado numerico.
+    // mod = 0 si no lleva modificador.
+    public static void ComboLenta(byte mod, byte vk, bool ext, int holdMs) {
+        uint fx = ext ? 1u : 0u;
+        byte sc = (byte)MapVirtualKey(vk, 0);
+        byte smod = 0;
+        if (mod != 0) {
+            smod = (byte)MapVirtualKey(mod, 0);
+            keybd_event(mod, smod, 0, UIntPtr.Zero);
+            System.Threading.Thread.Sleep(holdMs);
+        }
+        keybd_event(vk, sc, fx, UIntPtr.Zero);
+        System.Threading.Thread.Sleep(holdMs);
+        keybd_event(vk, sc, fx | 2u, UIntPtr.Zero);
+        if (mod != 0) {
+            System.Threading.Thread.Sleep(holdMs);
+            keybd_event(mod, smod, 2, UIntPtr.Zero);
+        }
+    }
+
+    public static bool Traer(IntPtr h, int show) {
+        // Si ya esta al frente no se hace nada (el Alt fantasma abriria el menu de la ventana)
+        if (GetForegroundWindow() == h && !IsIconic(h)) { return true; }
+        for (int i = 0; i < 2; i++) {
+            // Tecla fantasma para que Windows deje cambiar de ventana. Antes era
+            // Alt, pero el Alt le llegaba a la ventana que se iba (Excel se quedaba
+            // en modo navegacion de teclado / el ERP abria su menu). Ctrl solo no hace nada.
+            keybd_event(0x11, 0, 0, UIntPtr.Zero);
+            keybd_event(0x11, 0, 2, UIntPtr.Zero);
+            IntPtr fg = GetForegroundWindow();
+            uint pid;
+            uint fgT = GetWindowThreadProcessId(fg, out pid);
+            uint me = GetCurrentThreadId();
+            bool att = false;
+            if (fgT != me) { att = AttachThreadInput(me, fgT, true); }
+            if (IsIconic(h)) { ShowWindow(h, 9); }
+            if (show != 0) { ShowWindow(h, show); }
+            BringWindowToTop(h);
+            SetForegroundWindow(h);
+            if (att) { AttachThreadInput(me, fgT, false); }
+            // Revisa cada 10 ms (max 250) en vez de esperar 250 fijos
+            for (int w = 0; w < 25; w++) {
+                if (GetForegroundWindow() == h) { return true; }
+                System.Threading.Thread.Sleep(10);
+            }
+            if (GetForegroundWindow() == h) { return true; }
+        }
+        return false;
+    }
+}
+"@
+}
+[Motor]::SetProcessDPIAware() | Out-Null
+
+# --------------------------- diagnostico -------------------------------
+$Global:UltimoPaso = '(none)'
+
+function Paso([string]$m) {
+    $Global:UltimoPaso = $m
+    LogT $m
+    if ($Global:Debug -ne 1) { return }
+    $l = '[{0}] {1}' -f (Get-Date -Format 'HH:mm:ss.fff'), $m
+    Write-Host $l
+}
+
+# =================== PASOS DE CADA F1 / F2 (en memoria) ===================
+# Cada paso con los segundos desde que empezo y cuanto tardaste TU aparte. Ya
+# no se escribe a ningun archivo (20t): al terminar se saca lo importante para
+# el DETALLE de resumen_ultimas.txt. No guarda PROs ni notas.
+$Global:LogTiempos = 1                      # 1 = medir los pasos   0 = no
+$script:RelojFlujo = $null
+$script:TiemposBuf = $null
+$script:UsuarioMs  = 0                      # lo que tardaste tu (no cuenta como motor)
+$script:UsuarioT0  = -1
+
+function LogT([string]$m) {
+    if ($null -eq $script:TiemposBuf -or $null -eq $script:RelojFlujo) { return }
+    if ($m -match '^(Buscando ventana|ERP encontrado|Edge encontrado|Trayendo ERP|Teclas: )') { return }
+    [void]$script:TiemposBuf.Add(('{0,8:0.000} s   {1}' -f $script:RelojFlujo.Elapsed.TotalSeconds, $m))
+}
+# (20t) Ya no hay motor_log.txt: esto solo vacia lo que hubiera en memoria
+$script:BufferFlujo = $false
+function Vaciar-LogMotor {
+    if ($null -ne $Global:LogBuffer) { $Global:LogBuffer.Clear() }
+}
+
+function Iniciar-LogTiempos([string]$tipo) {
+    Vaciar-LogMotor
+    if ($null -eq $Global:LogBuffer -and $Global:LogArchivo -eq 1) {
+        $Global:LogBuffer = New-Object System.Collections.ArrayList
+        $script:BufferFlujo = $true
+    }
+    if ($Global:LogTiempos -ne 1) { return }
+    $script:RelojFlujo = [System.Diagnostics.Stopwatch]::StartNew()
+    $script:TiemposBuf = New-Object System.Collections.ArrayList
+    $script:UsuarioMs = 0; $script:UsuarioT0 = -1
+    $script:TipoFlujo = $tipo
+    $script:Pasos = [ordered]@{}
+    P 'hora' (Get-Date -Format 'HH:mm')
+    P 'fecha' (Get-Date -Format 'MM-dd')
+    P 'tipo' $(if ($tipo -like '*2 intras*') { 'F2' } else { 'F1' })
+    [void]$script:TiemposBuf.Add('')
+    [void]$script:TiemposBuf.Add(('===== {0}  {1}  ({2}) =====' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $tipo, $ScriptVersion))
+}
+# Marca cuando empieza / termina algo que haces TU (no se cuenta como motor)
+function Usuario-Inicio([string]$que) {
+    if ($null -eq $script:RelojFlujo) { return }
+    $script:UsuarioT0 = $script:RelojFlujo.ElapsedMilliseconds
+    LogT ">>> esperando que TU: $que"
+}
+function Usuario-Fin([string]$que) {
+    if ($null -eq $script:RelojFlujo -or $script:UsuarioT0 -lt 0) { return }
+    $d = $script:RelojFlujo.ElapsedMilliseconds - $script:UsuarioT0
+    $script:UsuarioMs += $d
+    $script:UsuarioT0 = -1
+    LogT ("<<< {0} (tardaste {1:0.0} s)" -f $que, ($d / 1000))
+    $kU = if ($que -like 'terminal*') { 'TU_terminal' } else { 'TU_Enter' }
+    P $kU ('{0:0.0}' -f ($d / 1000))
+}
+# Lo importante de un F1/F2 para el DETALLE del resumen: reintentos, color que
+# no detecto, PRO que no se vio, foco perdido, errores. Sale de los pasos que
+# se juntaron en memoria ($script:TiemposBuf). No lleva PROs ni notas.
+function Notas-DelFlujo($buf) {
+    $n = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $buf) { return '' }
+    foreach ($l in $buf) {
+        $m = ([string]$l -replace '^\s*[\d\.,]+ s\s+', '').Trim()
+        $x = $null
+        if ($m -match '^espera (E6|F1|F2|F3)_\w+: (\d+) ms completos \((.+)\)$') { $x = "$($Matches[1]) no detecto ($($Matches[3]))" }
+        elseif ($m -match '^espera ([A-Z]\d)_\w+: LISTO .*OJO') { $x = "$($Matches[1]) quedo igual que antes" }
+        elseif ($m -match '^PRO intento ([23]) de 3') { $x = "copiar PRO: intento $($Matches[1])" }
+        elseif ($m -match '^PRO en (.+): cambio ([\d\.,]+) %.*NO se ve') { $x = "PRO no se vio en $($Matches[1]) ($($Matches[2]) %)" }
+        elseif ($m -match '^Foco perdido \(al frente: (\S*)\)') { $x = "foco perdido (al frente: $($Matches[1]))" }
+        elseif ($m -match '^AVISO: es el mismo PRO') { $x = 'mismo PRO que la bill anterior' }
+        elseif ($m -match '^ERROR en \[(.+?)\] -> (.+) \(\S+ linea \d+\)$') { $x = "ERROR en [$($Matches[1])]: $($Matches[2])" }
+        elseif ($m -match '^Flujo auto detenido: (.+)$') { $x = "detenido: $($Matches[1])" }
+        if ($x -and -not $n.Contains($x)) { $n.Add($x) }
+    }
+    $s = $n -join '; '
+    if ($s.Length -gt 240) { $s = $s.Substring(0, 237) + '...' }
+    return $s
+}
+function Cerrar-LogTiempos([string]$fin) {
+    Vaciar-LogMotor
+    if ($script:BufferFlujo) { $Global:LogBuffer = $null; $script:BufferFlujo = $false }
+    if ($null -eq $script:TiemposBuf -or $null -eq $script:RelojFlujo) { return }
+    $tot = $script:RelojFlujo.ElapsedMilliseconds
+    $motor = $tot - $script:UsuarioMs
+    # Abajo del VERIFY, chiquito: "F1 OK IN 7.1 S" (tiempo del motor, sin lo que tardas tu)
+    if ($fin -like 'OK*') {
+        $tipoF = if ($script:TipoFlujo -match '^FORCE\s*(\d)') { 'F' + $Matches[1] } else { 'F' }
+        try { Show-TiempoFlujo $tipoF ($motor / 1000) } catch { }
+    }
+    [void]$script:TiemposBuf.Add(('===== FIN: {0}  |  motor {1:0.0} s  |  tu {2:0.0} s  |  total {3:0.0} s =====' -f $fin, ($motor / 1000), ($script:UsuarioMs / 1000), ($tot / 1000)))
+    $buf = $script:TiemposBuf
+    $script:TiemposBuf = $null; $script:RelojFlujo = $null
+    $nt = Notas-DelFlujo $buf
+    if ($fin -notlike 'OK*' -and $fin -ne 'ERROR' -and $nt -notlike "*$fin*") { $nt = $(if ($nt) { "$fin; $nt" } else { $fin }) }
+    P 'notas' $nt
+    P 'motor_s' ('{0:0.0}' -f ($motor / 1000))
+    P 'resultado' $(if ($fin -like 'OK*') { 'OK' } elseif ($fin -like 'CANCEL*') { 'CANCEL' } else { 'ERROR!' })
+    Guardar-Ultimas
+}
+# Espera con nombre de la tabla $Global:ForceT (sale en el log de tiempos)
+function EsperarT([string]$k) {
+    $ms = [int]$Global:ForceT[$k]
+    LogT "  espera $k = $ms ms"
+    P $k $ms
+    Start-Sleep -Milliseconds $ms
+}
+
+
+# ============ resumen_ultimas.txt: EL UNICO ARCHIVO DE LOG (20t) ============
+# Las ultimas 10 secuencias F1 y las ultimas 10 F2, en tablas separadas: un
+# renglon por paso, una columna por secuencia (la mas nueva a la izquierda),
+# en ms reales. Se reescribe despues de cada F1/F2. Marcas:
+#   *  = el paso termino antes (detecto listo)   + = espero de mas (cargo tarde)
+#   !  = algo raro (reintento, quedo igual)
+# Abajo: DETALLE de las que tuvieron algo y los datos para volver a cargarlo.
+# No guarda PROs, terminales ni notas: solo tiempos y nombres de pasos.
+$Global:ArchivoUltimas = Join-Path $PSScriptRoot 'resumen_ultimas.txt'
+$Global:UltimasPorTipo = 10
+$script:Pasos    = $null
+$script:Ultimas  = New-Object System.Collections.ArrayList
+$Global:OrdenPasos = @(
+    @('A1_CierraMenu','A1 cierra menu'), @('A2_FocoERP','A2 foco ERP'), @('A0_DespuesClickInicio','A0 click 110,217'),
+    @('A3_AntesInstruc','A3 antes 20,768'), @('A4_DespuesAltA','A4 Alt+A'), @('A5_DespuesFORCE','A5 FORCE1/2'),
+    @('TU_Enter','TU Enter (s)'), @('B1_DespuesGuardar','B1 ERP guarda'),
+    @('C1_FocoERP','C1 foco ERP'), @('C2_DespuesDobleClick','C2 doble click'), @('C3_DespuesShiftEnd','C3 Shift+Fin'),
+    @('C_llego','C  PRO llego ms'), @('C_intentos','C  PRO intentos'), @('C4_DespuesAltC','C4 Alt+C'),
+    @('D0_MinimizaERP','D0 minimiza ERP'), @('D1_FocoEdge','D1 foco Edge'), @('D2_DespuesClickBusca','D2 click busca'), @('D3_DespuesPegarPRO','D3 pega PRO'), @('D_intentos','D  PRO escrito'),
+    @('E1_CargaIntra','E1 carga intra'), @('E2_HoverNav1','E2 hover HU'), @('E3_DespuesNav1','E3 click HU'),
+    @('E4_HoverNav2','E4 hover 2o'), @('E5_DespuesNav2','E5 click 2o'), @('E6_CargaIntraVieja','E6 carga vieja'),
+    @('E7_DespuesClickBusca','E7 click busca'), @('E9_DespuesPegarPRO','E9 pega PRO'), @('E_intentos','E  PRO escrito'),
+    @('TU_terminal','TU terminal (s)'), @('G1_TrasTerminal','G1 tras terminal'),
+    @('F1_FocoEdge','F1 carga busca'), @('F2_DespuesNota1','F2 abre nota'), @('F3_DespuesNota2','F3 abre lista'),
+    @('F4_DespuesI','F4 tras la i'), @('F5_DespuesTab','F5 Tab'),
+    @('motor_s','MOTOR (s)'), @('resultado','RESULTADO'), @('fallo','FALLO EN')
+)
+
+function P([string]$k, $v) {
+    if ($null -eq $script:Pasos) { return }
+    $script:Pasos[$k] = [string]$v
+}
+
+# Numero al inicio de un valor ('420*' -> 420, '300!rep' -> 300, 'si' -> $null)
+function Num-De([string]$v) {
+    if ($v -match '^(\d+(\.\d+)?)') { return [double]$Matches[1] }
+    return $null
+}
+
+# Secciones para los subtotales (ms de motor de cada parte)
+$Global:SeccionesPasos = [ordered]@{
+    'A nota ERP'     = @('A1_CierraMenu','A2_FocoERP','A0_DespuesClickInicio','A3_AntesInstruc','A4_DespuesAltA','A5_DespuesFORCE')
+    'B ERP guarda'   = @('B1_DespuesGuardar')
+    'C copiar PRO'   = @('C1_FocoERP','C2_DespuesDobleClick','C3_DespuesShiftEnd','C_llego','C4_DespuesAltC')
+    'D busca normal' = @('D0_MinimizaERP','D1_FocoEdge','D2_DespuesClickBusca','D3_DespuesPegarPRO','D_busqueda')
+    'E intra vieja'  = @('E1_CargaIntra','E2_HoverNav1','E3_DespuesNav1','E4_HoverNav2','E5_DespuesNav2','E6_CargaIntraVieja','E7_DespuesClickBusca','E8_PROalPortapapeles','E9_DespuesPegarPRO','E_busqueda')
+    'G terminal'     = @('G1_TrasTerminal')
+    'F nota intra'   = @('F1_FocoEdge','F2_DespuesNota1','F3_DespuesNota2','F4_DespuesI','F5_DespuesTab')
+}
+
+function Guardar-Ultimas {
+    if ($null -eq $script:Pasos) { return }
+    [void]$script:Ultimas.Insert(0, $script:Pasos)
+    $script:Pasos = $null
+    # Se quedan solo las ultimas 10 de F1 y las ultimas 10 de F2
+    $cuenta = @{ F1 = 0; F2 = 0 }
+    $quedan = New-Object System.Collections.ArrayList
+    foreach ($c in $script:Ultimas) {
+        $t = if ([string]$c['tipo'] -eq 'F2') { 'F2' } else { 'F1' }
+        if ($cuenta[$t] -lt $Global:UltimasPorTipo) { $cuenta[$t]++; [void]$quedan.Add($c) }
+    }
+    $script:Ultimas = $quedan
+    Escribir-Ultimas
+}
+
+# Una tabla (F1 o F2): un renglon por paso, una columna por secuencia
+function Tabla-Ultimas($cols, $L) {
+    $W = 8
+    $enc = '{0,-16}{1,6}' -f 'paso', 'tabla'
+    foreach ($c in $cols) { $enc += ('{0,' + $W + '}') -f $c['hora'] }
+    $enc += '{0,9}' -f 'necesita'
+    [void]$L.Add($enc)
+    $enc = '{0,-16}{1,6}' -f 'fecha', ''
+    foreach ($c in $cols) { $enc += ('{0,' + $W + '}') -f $c['fecha'] }
+    [void]$L.Add($enc)
+    [void]$L.Add(('-' * (22 + $W * $cols.Count + 9)))
+    $oks = @($cols | Where-Object { $_['resultado'] -eq 'OK' })
+    $ocultos = 0
+    foreach ($par in $Global:OrdenPasos) {
+        $k = $par[0]
+        if ($k -in @('motor_s', 'resultado', 'fallo')) { continue }
+        $hay = $false
+        foreach ($c in $cols) { if ($c.Contains($k)) { $hay = $true } }
+        if (-not $hay) { continue }
+        $tab = if ($Global:ForceT.Contains($k)) { [string]$Global:ForceT[$k] } else { '' }
+        # Paso fijo: si en todas las columnas salio igual a la tabla (o 0 = no hizo
+        # falta esperar), no se muestra (no da informacion)
+        $vals = @($cols | Where-Object { $_.Contains($k) } | ForEach-Object { [string]$_[$k] })
+        if ($tab -and -not ($vals | Where-Object { $_ -ne $tab -and $_ -ne '0' })) { $ocultos++; continue }
+        $fila = '{0,-16}{1,6}' -f $par[1], $tab
+        foreach ($c in $cols) {
+            $v = if ($c.Contains($k)) { [string]$c[$k] } else { '-' }
+            if ($v.Length -gt ($W - 1)) { $v = $v.Substring(0, $W - 1) }
+            $fila += ('{0,' + $W + '}') -f $v
+        }
+        # necesita: solo para pasos que detectan listo (valores con *)
+        $listos = @($oks | Where-Object { $_.Contains($k) -and ([string]$_[$k]) -match '\*' } | ForEach-Object { Num-De $_[$k] })
+        $fila += if ($listos.Count) { '{0,9}' -f (($listos | Measure-Object -Maximum).Maximum) } else { '{0,9}' -f '' }
+        [void]$L.Add($fila)
+    }
+    if ($ocultos) { [void]$L.Add(('({0} pasos fijos no se muestran: salieron igual a la tabla)' -f $ocultos)) }
+    # Subtotales por parte
+    [void]$L.Add(('-' * (22 + $W * $cols.Count + 9)))
+    foreach ($sec in $Global:SeccionesPasos.Keys) {
+        $hay = $false
+        $fila = '{0,-22}' -f ('= ' + $sec)
+        foreach ($c in $cols) {
+            $sum = 0; $alguno = $false
+            foreach ($k in $Global:SeccionesPasos[$sec]) {
+                if ($c.Contains($k)) { $n = Num-De ([string]$c[$k]); if ($null -ne $n) { $sum += $n; $alguno = $true } }
+            }
+            if ($alguno) { $hay = $true; $fila += ('{0,' + $W + '}') -f ([Math]::Round($sum)) } else { $fila += ('{0,' + $W + '}') -f '-' }
+        }
+        if ($hay) { [void]$L.Add($fila) }
+    }
+    # Lo que no es espera (clicks, teclas, cambiar de ventana, revisar)
+    $fila = '{0,-22}' -f '= otros (clicks/teclas)'
+    foreach ($c in $cols) {
+        $mot = Num-De ([string]$c['motor_s'])
+        if ($null -eq $mot) { $fila += ('{0,' + $W + '}') -f '-'; continue }
+        $sum = 0
+        foreach ($sec in $Global:SeccionesPasos.Keys) { foreach ($k in $Global:SeccionesPasos[$sec]) { if ($c.Contains($k)) { $n = Num-De ([string]$c[$k]); if ($null -ne $n) { $sum += $n } } } }
+        $fila += ('{0,' + $W + '}') -f ([Math]::Max(0, [Math]::Round($mot * 1000 - $sum)))
+    }
+    [void]$L.Add($fila)
+    [void]$L.Add(('-' * (22 + $W * $cols.Count + 9)))
+    foreach ($par in @(@('motor_s', 'MOTOR (s)'), @('resultado', 'RESULTADO'), @('fallo', 'FALLO EN'))) {
+        $fila = '{0,-22}' -f $par[1]
+        foreach ($c in $cols) {
+            $v = if ($c.Contains($par[0])) { [string]$c[$par[0]] } else { '-' }
+            if ($v.Length -gt ($W - 1)) { $v = $v.Substring(0, $W - 1) }
+            $fila += ('{0,' + $W + '}') -f $v
+        }
+        [void]$L.Add($fila)
+    }
+}
+
+function Escribir-Ultimas {
+    $L = New-Object System.Collections.ArrayList
+    [void]$L.Add(('RESUMEN F1 / F2 (ms)   {0}   actualizado {1}' -f $ScriptVersion, (Get-Date -Format 'yyyy-MM-dd HH:mm')))
+    [void]$L.Add('* = listo antes (color)   + = espero de mas (cargo tarde)   ! = reintento / quedo igual')
+    [void]$L.Add('necesita = lo mas que tardo en las OK   TU = lo que tardaste tu (no cuenta en MOTOR)')
+    foreach ($t in @('F1', 'F2')) {
+        $cols = @($script:Ultimas | Where-Object { ([string]$_['tipo'] -eq 'F2') -eq ($t -eq 'F2') })
+        $tit = if ($t -eq 'F1') { 'F1 (solo intra normal)' } else { 'F2 (y F1 con cons: 2 intras)' }
+        [void]$L.Add('')
+        if (-not $cols.Count) { [void]$L.Add(('===== {0} : todavia no hay =====' -f $tit)); continue }
+        [void]$L.Add(('===== {0} : ultimas {1} =====' -f $tit, $cols.Count))
+        Tabla-Ultimas $cols $L
+    }
+    # Detalle: solo las secuencias donde paso algo (reintentos, color, errores)
+    $det = @($script:Ultimas | Where-Object { $_['notas'] -or ([string]$_['resultado'] -ne 'OK') })
+    [void]$L.Add('')
+    [void]$L.Add('===== DETALLE (solo las que tuvieron algo: reintentos, color que no detecto, errores) =====')
+    if ($det.Count) {
+        foreach ($c in $det) { [void]$L.Add(('{0} {1}  {2,-2}  {3,-7} {4}' -f $c['fecha'], $c['hora'], $c['tipo'], $c['resultado'], $c['notas'])) }
+    } else {
+        [void]$L.Add('(nada: todas salieron OK a la primera)')
+    }
+    # Datos para volver a cargar el resumen al abrir el menu (solo tiempos)
+    [void]$L.Add('')
+    [void]$L.Add('---- datos para volver a cargar el resumen al abrir el menu (no editar) ----')
+    foreach ($c in $script:Ultimas) { try { [void]$L.Add('#D ' + (ConvertTo-Json -InputObject $c -Compress)) } catch { } }
+    try { Set-Content -Path $Global:ArchivoUltimas -Value $L } catch { }
+}
+
+# Al arrancar: vuelve a cargar las ultimas secuencias (los renglones #D del
+# mismo resumen_ultimas.txt). Si todavia existe el .dat de antes, lo usa una vez.
+function Cargar-UnaUltima([string]$js) {
+    $o = ConvertFrom-Json $js
+    $h = [ordered]@{}
+    foreach ($pr in $o.PSObject.Properties) { $h[$pr.Name] = [string]$pr.Value }
+    [void]$script:Ultimas.Add($h)
+}
+$Global:ArchivoUltimasDat = Join-Path $PSScriptRoot 'resumen_ultimas.dat'
+try {
+    if (Test-Path -LiteralPath $Global:ArchivoUltimas) {
+        foreach ($ln in (Get-Content -LiteralPath $Global:ArchivoUltimas)) {
+            if ($ln.StartsWith('#D ')) { try { Cargar-UnaUltima $ln.Substring(3) } catch { } }
+        }
+    }
+    if ($script:Ultimas.Count -eq 0 -and (Test-Path -LiteralPath $Global:ArchivoUltimasDat)) {
+        foreach ($ln in (Get-Content -LiteralPath $Global:ArchivoUltimasDat)) { if ($ln.Trim()) { try { Cargar-UnaUltima $ln } catch { } } }
+    }
+    if ($script:Ultimas.Count) { Escribir-Ultimas }        # que ya salga con el formato nuevo
+} catch { }
+# 20t: un solo archivo de log (resumen_ultimas.txt). Borra los que ya no se
+# usan (solo estos nombres y solo en la carpeta del Force Menu).
+$Global:LogsViejos = @('motor_log.txt', 'tiempos_log.txt', 'tiempos_por_hora.csv', 'resumen_por_hora.txt', 'resumen_ultimas.dat')
+foreach ($v in $Global:LogsViejos) {
+    try { Remove-Item -LiteralPath (Join-Path $PSScriptRoot $v) -Force -ErrorAction SilentlyContinue } catch { }
+}
+$script:TipoFlujo = ''
+$script:UltPortaMs = -1
+$Global:LogBuffer = $null
+
+# Muestra en que paso fallo, el error y la linea del script
+function Fallo($err, [string]$titulo = 'Motor') {
+    $donde = $Global:UltimoPaso
+    P 'fallo' $titulo
+    $linea = $err.InvocationInfo.ScriptLineNumber
+    $archivo = Split-Path -Leaf $err.InvocationInfo.ScriptName
+    $txt = "FAILED AT STEP:`n  $donde`n`nERROR:`n  $($err.Exception.Message)`n`nFILE / LINE:`n  $archivo  line $linea`n`nNothing else was sent."
+    $Global:Debug = 1
+    Paso ("ERROR en [" + $donde + "] -> " + $err.Exception.Message + " ($archivo linea $linea)")
+    [System.Windows.Forms.MessageBox]::Show($txt, $titulo) | Out-Null
+}
+
+# ----------------------------- basicos ---------------------------------
+function Esperar([int]$ms = $Global:PausaMs) { Start-Sleep -Milliseconds $ms }
+function Teclas([string]$k) { Paso "Teclas: $k"; [System.Windows.Forms.SendKeys]::SendWait($k) }
+# --------------------------- coordenadas -------------------------------
+# Se lee del archivo solo la 1a vez y cuando el archivo cambia (antes se
+# leia en cada click, ~2 veces por click).
+$script:CoordsCache = $null
+$script:CoordsFecha = [datetime]::MinValue
+function Leer-MisCoords {
+    if (-not [System.IO.File]::Exists($Global:ArchivoCoords)) { $script:CoordsCache = $null; return @{} }
+    $fecha = [System.IO.File]::GetLastWriteTimeUtc($Global:ArchivoCoords)
+    if ($null -ne $script:CoordsCache -and $fecha -eq $script:CoordsFecha) { return $script:CoordsCache.Clone() }
+    $r = @{}
+    foreach ($l in [System.IO.File]::ReadAllLines($Global:ArchivoCoords)) {
+        if ($l -match '^\s*(\w+)\s*=\s*(-?\d+)\s*,\s*(-?\d+)') {
+            $r[$Matches[1]] = @([int]$Matches[2], [int]$Matches[3])
+        }
+    }
+    $script:CoordsCache = $r
+    $script:CoordsFecha = $fecha
+    return $r.Clone()
+}
+
+# Devuelve @(X,Y): el mio si existe (y esta activado), si no el de la lista base
+function Get-XY([string]$nombre) {
+    if ($Global:Coord -eq 1) {
+        $m = Leer-MisCoords
+        if ($m.ContainsKey($nombre)) { return $m[$nombre] }
+    }
+    return $Global:Puntos[$nombre].XY
+}
+
+function DobleClickXY([string]$nombre) {
+    $p = Get-XY $nombre
+    Paso "Doble click $nombre en $($p[0]),$($p[1])"
+    [Motor]::DoubleClick($p[0], $p[1])
+}
+
+# Espera hasta que haya texto en el portapapeles (max $ms). Devuelve el texto o ''
+function Esperar-Portapapeles([int]$ms) {
+    $t = 0
+    while ($t -lt $ms) {
+        $txt = ''
+        try { $txt = [System.Windows.Forms.Clipboard]::GetText() } catch {}
+        if ($txt -and $txt.Trim()) {
+            Paso "Portapapeles listo a los $t ms"
+            $script:UltPortaMs = $t
+            return $txt.Trim()
+        }
+        Start-Sleep -Milliseconds 25           # revisa cada 25 ms (antes 100)
+        $t += 25
+    }
+    Paso "Portapapeles vacio despues de $ms ms"
+    return ''
+}
+
+function ClickXY([string]$nombre) {
+    if (-not $Global:Puntos.Contains($nombre)) { throw "Unknown point: $nombre" }
+    $p = Get-XY $nombre
+    $fuente = 'base'
+    if ($Global:Coord -eq 1 -and (Leer-MisCoords).ContainsKey($nombre)) { $fuente = 'mia' }
+    Paso "Click $nombre en $($p[0]),$($p[1]) ($fuente)"
+    [Motor]::Click($p[0], $p[1])
+}
+
+function Get-VentanaERP {
+    Get-Process -Name mstsc -ErrorAction SilentlyContinue |
+        Where-Object { $_.MainWindowTitle -like "*$Global:ERP_Titulo1*" -and
+                       $_.MainWindowTitle -like "*$Global:ERP_Titulo2*" } |
+        Select-Object -First 1
+}
+function Get-VentanaEdge {
+    Get-Process -Name msedge -ErrorAction SilentlyContinue |
+        Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero } |
+        Select-Object -First 1
+}
+
+function Traer-ERP([int]$esperaMs = $Global:EsperaFocoERPms, [string]$clave = '', [switch]$Siempre) {
+    Paso "Buscando ventana del ERP ('$Global:ERP_Titulo1' + '$Global:ERP_Titulo2')"
+    $e = Get-VentanaERP
+    if (-not $e) {
+        $hay = (Get-Process -Name mstsc -ErrorAction SilentlyContinue | ForEach-Object { $_.MainWindowTitle }) -join ' | '
+        if (-not $hay) { $hay = 'none' }
+        throw "ERP window not found. Open remote desktops: $hay"
+    }
+    Paso "ERP encontrado: $($e.MainWindowTitle)"
+    Paso 'Trayendo ERP al frente'
+    $yaAlFrente = ([Motor]::GetForegroundWindow() -eq $e.MainWindowHandle)
+    $ok = [Motor]::Traer($e.MainWindowHandle, 3)
+    if (-not $ok -and [Motor]::ProcesoAlFrente() -eq 'mstsc') { $ok = $true }
+    if (-not $ok) { throw "The ERP did not come to the front (in front: $([Motor]::ProcesoAlFrente()))." }
+    if ($yaAlFrente -and -not $Siempre) {
+        # Ya tenia el foco desde antes: no hace falta esperar
+        Paso 'ERP ya estaba al frente (sin espera)'
+        if ($clave) { P $clave '0' }
+        return $e
+    }
+    Paso "ERP al frente: OK (espera foco $esperaMs ms)"
+    if ($clave) { P $clave $esperaMs }
+    # El Escritorio Remoto tarda en aceptar clicks/teclas despues de recibir el foco
+    Esperar $esperaMs
+    return $e
+}
+function Traer-Edge {
+    # Si Edge YA esta al frente, no se toca nada (ni se minimiza el ERP)
+    if ([Motor]::ProcesoAlFrente() -eq 'msedge') { Paso 'Edge ya estaba al frente: OK'; Esperar 200; return }
+    $e = Get-VentanaERP
+    if ($e) { Paso 'Minimizando ERP'; [Motor]::ShowWindow($e.MainWindowHandle, 6) | Out-Null; EsperarT 'D0_MinimizaERP' }
+    Paso 'Buscando ventana de Edge'
+    $w = Get-VentanaEdge
+    if (-not $w) { throw 'Microsoft Edge (msedge) is not open.' }
+    Paso "Edge encontrado: $($w.MainWindowTitle)"
+    $ok = [Motor]::Traer($w.MainWindowHandle, 0)
+    # Edge tiene varias ventanas internas: si la que quedo al frente es de Edge, cuenta como OK
+    if (-not $ok -and [Motor]::ProcesoAlFrente() -eq 'msedge') { $ok = $true }
+    if (-not $ok) { throw "Edge did not come to the front (in front: $([Motor]::ProcesoAlFrente()))." }
+    Paso 'Edge al frente: OK'
+}
+
+# --------------------- secuencia AUDIT (Ctrl izq + Abajo) ---------------------
+# ===== TIEMPOS DE LA SECUENCIA AUDIT (Ctrl izq + Abajo), en milisegundos =====
+# Todo a la mitad (~0.5 s menos que la build 14f). T11 y T12 van al mismo
+# tiempo que llega lo copiado de mypc: bajarlas solo ahorra si mypc es rapido.
+# Si algun paso falla, subele solo a ese (de 50 en 50).
+# Al terminar sale arriba "AUDIT OK en X.X s" para que midas.
+$Global:AuditT = [ordered]@{
+    T01_AntesEsc     = 10    # 1. al soltar el Ctrl, antes del Esc en el ERP
+    T02_TeclaEsc     = 30    #    cuanto se deja apretado el Esc
+    T03_DespuesEsc   = 30    # 2. despues del Esc (que el ERP salga de la bill)
+    T04_FocoMyPC     = 50    # 3. al pasar a mypc, antes de teclear
+    T05_AntesDer     = 25    # 4. espera extra antes de la flecha Derecha
+    T06_TeclaExcel   = 20    #    cuanto se deja apretada cada tecla del Excel de mypc
+    T07_DespuesDer   = 25    # 5. despues de Derecha (escribe la 1a letra)
+    T08_DespuesO     = 25    # 6. despues de la o (autorrellena)
+    T09_DespuesAbajo = 25    # 7. despues de Abajo (confirma)
+    T10_DespuesIzq   = 25    # 8. despues de Izquierda (siguiente en lista), antes de copiar
+    T11_FocoERP      = 100   # 9. al regresar al ERP, antes del click
+    T12_DespuesClick = 60    # 10. despues del click en 1185,545
+    T13_DespuesPegar = 30    # 11. despues de pegar, antes del Enter
+}
+# (lo copiado se espera solo: hasta 3 s, sigue en cuanto llega)
+
+# $true = TECLEA en el ERP lo copiado del Excel de mypc (rapido).
+# $false = lo pega con Ctrl+V (el ERP tarda ~2 s en pedir el portapapeles
+#          al Escritorio Remoto antes de pegar).
+$Global:AuditTeclear = $true
+
+# Se mueve entre el ERP y el Escritorio Remoto "mypc" (Excel).
+$Global:MyPC_Titulo = 'mypc'
+
+# ERP: Esc (sale de la bill) > mypc (Excel): Der (1a letra) > o (autorrellena) > Abajo (confirma) > Izq (sig. en lista)
+#   > copiar > ERP: click 1185,545 > pegar > Enter
+# Ventanas del ERP y de mypc guardadas (buscarlas con Get-Process tarda;
+# solo se vuelven a buscar si la ventana guardada ya no existe)
+$script:AuditHwnd = @{ ERP = [IntPtr]::Zero; MyPC = [IntPtr]::Zero }
+
+function Get-AuditHwnds {
+    $okE = $script:AuditHwnd.ERP  -ne [IntPtr]::Zero -and [LocalKeyState]::IsWindow($script:AuditHwnd.ERP)
+    $okM = $script:AuditHwnd.MyPC -ne [IntPtr]::Zero -and [LocalKeyState]::IsWindow($script:AuditHwnd.MyPC)
+    if ($okE -and $okM) { return }
+    Paso 'Audit: buscando ventanas ERP y mypc'
+    foreach ($p in @(Get-Process -Name mstsc -ErrorAction SilentlyContinue)) {
+        $t = $p.MainWindowTitle
+        if ($t -like "*$Global:ERP_Titulo1*" -and $t -like "*$Global:ERP_Titulo2*") { $script:AuditHwnd.ERP = $p.MainWindowHandle }
+        elseif ($t -like "$Global:MyPC_Titulo*") { $script:AuditHwnd.MyPC = $p.MainWindowHandle }
+    }
+    if ($script:AuditHwnd.ERP  -eq [IntPtr]::Zero) { throw 'ERP window (TS Applications) not found.' }
+    if ($script:AuditHwnd.MyPC -eq [IntPtr]::Zero) { throw "Window '$Global:MyPC_Titulo' (Remote Desktop) not found." }
+}
+
+function Traer-AuditHwnd([string]$cual, [int]$esperaMs) {
+    $h = $script:AuditHwnd[$cual]
+    $ok = [Motor]::Traer($h, 3)
+    if (-not $ok -and [Motor]::ProcesoAlFrente() -eq 'mstsc') { $ok = $true }
+    if (-not $ok) { $script:AuditHwnd[$cual] = [IntPtr]::Zero; throw "$cual did not come to the front (in front: $([Motor]::ProcesoAlFrente()))." }
+    Paso "$cual al frente"
+    Esperar $esperaMs
+}
+
+function Invoke-SecuenciaAudit {
+    $propio = ($null -eq $Global:LogBuffer)    # si un F1/F2 ya tiene buffer, se usa ese
+    if ($propio) { $Global:LogBuffer = New-Object System.Collections.ArrayList }
+    try { return (Invoke-SecuenciaAuditPasos) }
+    finally {
+        # Escribe el log de la audit de un jalon al final
+        Vaciar-LogMotor
+        if ($propio) { $Global:LogBuffer = $null }
+    }
+}
+
+function Invoke-SecuenciaAuditPasos {
+    Paso '=== INICIO Secuencia audit ==='
+    $T = $Global:AuditT
+    $reloj = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        Get-AuditHwnds
+        # Esc para salir de la bill: siempre arrancas sobre el ERP con foco,
+        # asi que va directo (sin traer ventanas: eso mandaba un Alt al ERP).
+        # Teclas "de mano" (apretadas unos ms, con scan code) para el Escritorio Remoto.
+        Esperar $T.T01_AntesEsc
+        Paso 'Esc en la ventana actual (ERP)'
+        [Motor]::TeclaLenta(0x1B, $T.T02_TeclaEsc)
+        Esperar $T.T03_DespuesEsc
+        Traer-AuditHwnd 'MyPC' $T.T04_FocoMyPC
+        Esperar $T.T05_AntesDer
+        Paso 'Excel: Der > o > Abajo > Izq'
+        [Motor]::TeclaLenta(0x27, $T.T06_TeclaExcel); Esperar $T.T07_DespuesDer     # Derecha (1a letra)
+        [Motor]::TeclaLenta(0x4F, $T.T06_TeclaExcel); Esperar $T.T08_DespuesO       # o (autorrellena)
+        [Motor]::TeclaLenta(0x28, $T.T06_TeclaExcel); Esperar $T.T09_DespuesAbajo   # Abajo (confirma)
+        [Motor]::TeclaLenta(0x25, $T.T06_TeclaExcel); Esperar $T.T10_DespuesIzq     # Izquierda (sig. en lista)
+        try { [System.Windows.Forms.Clipboard]::Clear() } catch {}
+        Teclas '^c'
+        # No se espera a que llegue lo copiado aqui: mientras viaja desde mypc
+        # se regresa al ERP y se da el click (como se hacia a mano). Se espera
+        # solo justo antes de escribirlo, y casi siempre ya llego.
+        $tCopia = $reloj.ElapsedMilliseconds
+        Traer-AuditHwnd 'ERP' $T.T11_FocoERP
+        Paso 'Click en 1185,545'
+        [Motor]::Click(1185, 545); Esperar $T.T12_DespuesClick
+        $txt = Esperar-Portapapeles 3000          # solo espera si todavia no llega
+        Paso "Audit: lo copiado estuvo listo a los $($reloj.ElapsedMilliseconds - $tCopia) ms del Ctrl+C"
+        if (-not $txt) { throw 'Nothing was copied from the mypc Excel (empty clipboard). Nothing was typed in the ERP.' }
+        if ($Global:AuditTeclear) {
+            # Escribe el texto (los simbolos especiales de SendKeys van entre llaves)
+            $esc = -join ($txt.ToCharArray() | ForEach-Object {
+                if ('+^%~(){}[]'.Contains([string]$_)) { '{' + $_ + '}' } else { [string]$_ } })
+            Paso "Tecleando lo copiado ($($txt.Length) caracteres)"
+            [System.Windows.Forms.SendKeys]::SendWait($esc)
+        } else {
+            Teclas '^v'
+        }
+        Esperar $T.T13_DespuesPegar
+        Teclas '{ENTER}'
+        $seg = '{0:0.0}' -f $reloj.Elapsed.TotalSeconds
+        Paso "=== FIN Secuencia audit: OK en $seg s ==="
+        $acentoPrevio = $script:WatermarkAccent
+        $script:WatermarkAccent = '#3FB950'
+        Show-Watermark 'AUDIT' "AUDIT OK IN $seg S"
+        $script:WatermarkAccent = $acentoPrevio
+        return $true
+    } catch { Fallo $_ 'Audit sequence'; return $false }
+}
+
+# Pega texto via portapapeles (mas confiable que teclearlo con SendKeys)
+function Pegar([string]$texto, [int]$antesMs = 150) {
+    Paso "Pegando texto ($($texto.Length) caracteres)"
+    if (-not $texto) { throw 'The text to paste is empty.' }
+    [System.Windows.Forms.Clipboard]::SetText($texto)
+    Esperar $antesMs
+    Teclas '^v'
+}
+
+# --------------------------- secuencias --------------------------------
+
+# ===== TIEMPOS DE FORCE 1 / FORCE 2, en milisegundos =====
+# VELOCIDAD 4 (build 20q) = los tiempos de la 4 (20e) + TODAS las mejoras
+# hasta la 20p (1er intento del PRO de mano, intra vieja con color y espera
+# extra, revision de PRO escrito, notas 20k-20n). Se regreso a la 4 porque la 3
+# fallaba 1 de cada 10 al pegar la nota en la intra (~0.2-0.3 s mas por bill).
+# Escala: 10 = 15j (la mas lenta), 9 = 15k, 8 = 15m, 7 = 15n, 6 = 17l,
+# 5 = 20d, 4 = 20e / 20q (actual), 3 = 20p.
+#   - COLOR (max = tabla): E1, E6, F1, F2, F3. Minimos en $Global:ColorMin
+#   - NO se toca: B1, C2, C3, E5, E7 (NO BAJAR), D2, D3 (en revision), E3,
+#     E9, G1, F4 y los 70 del portapapeles
+# Columna derecha = valor de la velocidad 3 (20p), por referencia.
+# Si un paso falla, regresa SOLO ese al valor de la derecha.
+$Global:ForceT = [ordered]@{
+    # --- A. NOTA ERP (al dar Enter en "revisar") ------------- vel 3
+    A1_CierraMenu        = 100    # se cierra el menu antes de empezar      85
+    A0_DespuesClickInicio = 110   # click en 110,217 (foco en el ERP)       95
+    A2_FocoERP           = 130    # trae el ERP al frente                   110
+    A3_AntesInstruc      = 130    # antes del click en 20,768               110
+    A4_DespuesAltA       = 180    # click 20,768 + Alt+A, abre ventanita    155
+    A5_DespuesFORCE      = 150    # escribe FORCE1 / FORCE2                 130
+    A6_AntesPegarNota    = 70     # Tab y pega la nota ERP                  70
+    # --- B. GUARDAS TU (Alt+O o Enter) ----------------------------
+    B1_DespuesGuardar    = 520    # que el ERP guarde     (NO BAJAR)        520
+    # --- C. COPIAR PRO (en el ERP) --------------------------------
+    C1_FocoERP           = 130    # trae el ERP (solo si NO estaba al frente) 110
+    C2_DespuesDobleClick = 300    # doble click PRO 18,60 (NO BAJAR)        300
+    C3_DespuesShiftEnd   = 170    # Shift+Fin, Ctrl+C     (NO BAJAR)        170
+    C4_DespuesAltC       = 110    # Inicio + Alt+C (cierra)                 95
+    # --- D. BUSCAR PRO EN INTRA NORMAL ----------------------------
+    D0_MinimizaERP       = 70     # minimiza el ERP antes de traer Edge     60
+    D1_FocoEdge          = 80     # trae Edge al frente                     70
+    D2_DespuesClickBusca = 150    # click buscador 100,115 (EN REVISION)    150
+    D3_DespuesPegarPRO   = 150    # escribe PRO, Enter     (EN REVISION)    150
+    # --- E. INTRA VIEJA (solo F2 y F1 con cons) -------------------
+    E1_CargaIntra        = 630    # carga intra      (COLOR, max)           630
+    E2_HoverNav1         = 210    # mouse encima de HU status (792,174)     180
+    E3_DespuesNav1       = 300    # click en HU status                      300
+    E4_HoverNav2         = 210    # mouse encima de 780,724                 180
+    E5_DespuesNav2       = 420    # click 780,724          (NO BAJAR)       420
+    E6_CargaIntraVieja   = 630    # carga intra vieja (COLOR, max)          630
+    E7_DespuesClickBusca = 170    # click buscador viejo   (NO BAJAR)       170
+    E8_PROalPortapapeles = 70     # (solo si se pega con Ctrl+V)            70
+    E9_DespuesPegarPRO   = 630    # escribe PRO, luego Enter                630
+    # --- F. NOTA INTRA (informational) ----------------------------
+    F1_FocoEdge          = 800    # carga la busqueda (COLOR, max)          800
+    F2_DespuesNota1      = 1000   # click 788,198 abre nota (COLOR, max)    1000
+    F3_DespuesNota2      = 1000   # click 390,212 abre lista (COLOR, max)   1000
+    F4_DespuesI          = 410    # "i" = informational         (FIJO)      410
+    F5_DespuesTab        = 150    # Tab al texto de la nota                 130
+    F6_AntesPegarNota    = 70     # pega la nota intra                      70
+    # --- G. TERMINAL (con hold) -----------------------------------
+    G1_TrasTerminal      = 400    # Enter en la terminal  (NO BAJAR)        400
+}
+# (copiar el PRO espera solo lo necesario: hasta 3 s, sigue en cuanto llega)
+
+# Busqueda en intra (normal y vieja): Enter y apunta la hora (las esperas de
+# carga cuentan desde aqui). La foto de antes del Enter es para la deteccion
+# por color.
+function Enter-Busqueda([string]$donde, [string]$punto) {
+    $kB = if ($donde -like '*vieja*') { 'E_busqueda' } else { 'D_busqueda' }
+    $script:FotoBusqueda = Foto (Get-ZonaEdge)    # como se ve ANTES del Enter (color)
+    Teclas '{ENTER}'
+    $script:TEnterBusqueda = $script:RelojMotor.ElapsedMilliseconds   # las esperas de carga cuentan desde aqui
+    P $kB 'Enter'
+}
+
+
+# Nota de force en el ERP
+function Invoke-NotaERP {
+    param([string]$Force, [string]$Nota)
+    $F = $Global:ForceT
+    Paso "=== INICIO Nota ERP ($Force) ==="
+    $swParte = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        Traer-ERP $F.A2_FocoERP | Out-Null
+        EsperarT 'A3_AntesInstruc'
+        ClickXY 'ERP_Instrucciones'
+        Teclas '%a'                     # Alt+A
+        EsperarT 'A4_DespuesAltA'
+        Teclas $Force                   # FORCE1 / FORCE2
+        EsperarT 'A5_DespuesFORCE'
+        Teclas '{TAB}'
+        Pegar $Nota $F.A6_AntesPegarNota
+        Paso '=== FIN Nota ERP: OK ==='
+        return $true
+    } catch {
+        Fallo $_ 'ERP note'
+        return $false
+    }
+}
+
+# Nota informativa en intra
+function Invoke-NotaIntra {
+    param([string]$Nota)
+    $F = $Global:ForceT
+    Paso '=== INICIO Nota intra ==='
+    $swParte = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        # F1: la nota se pone donde dejo Edge el PRO lookup F1 (intra normal).
+        # NO se va a la intra vieja (eso solo es de F2).
+        Traer-Edge
+        # F1: carga del resultado, contada desde el Enter de la busqueda
+        EsperarCargaBusqueda 'F1_FocoEdge' 150
+        # F2 y F3 por COLOR: foto antes del click y sigue en cuanto la nota /
+        # la lista aparecio y se quedo quieta (maximo = tabla, minimo = ColorMin)
+        $fotoNota = Foto (Get-ZonaEdge)
+        ClickXY 'Intra_Nota1'
+        Esperar-Pantalla 'F2_DespuesNota1' $fotoNota
+        Asegurar-Edge
+        $fotoLista = Foto (Get-ZonaDebajo 'Intra_Nota2')
+        ClickXY 'Intra_Nota2'
+        Esperar-Pantalla 'F3_DespuesNota2' $fotoLista
+        Asegurar-Edge
+        Teclas 'i'
+        EsperarT 'F4_DespuesI'
+        Teclas '{TAB}'
+        EsperarT 'F5_DespuesTab'
+        Asegurar-Edge
+        Pegar $Nota $F.F6_AntesPegarNota
+        $script:EdgeEnIntra = 'vieja'
+        Paso '=== FIN Nota intra: OK ==='
+        return $true
+    } catch {
+        Fallo $_ 'Intra note'
+        return $false
+    }
+}
+
+
+# ============ ESPERAS QUE AVANZAN EN CUANTO LA PAGINA ESTA LISTA ============
+# Los valores de la tabla $Global:ForceT son el MAXIMO: si se detecta que ya
+# esta listo, sigue antes. Si no se puede detectar, espera el maximo (igual
+# que antes), asi que nunca tarda mas que con la espera fija.
+$script:RelojMotor     = [System.Diagnostics.Stopwatch]::StartNew()
+$script:TEnterBusqueda = -1
+
+# ============ DETECCION POR COLOR DE PANTALLA (velocidad 4) ============
+# Para las esperas de Edge que eran fijas (cargas de pagina, abrir la nota,
+# abrir la lista): toma una "foto" de la zona ANTES del click / Enter y sigue
+# en cuanto la pantalla CAMBIO y despues se quedo QUIETA un rato (ya termino
+# de cargar / dibujarse).
+#   - Nunca espera MAS que el valor de la tabla (si no detecta, espera eso).
+#   - Nunca sigue ANTES del minimo de cada paso ($Global:ColorMin).
+#   - Solo lee pixeles de la pantalla (como una captura); no guarda nada.
+# $Global:UsarColor = $false -> todo vuelve a esperas fijas (como la 5).
+$Global:UsarColor     = $true
+$Global:ColorPaso     = 6        # 1 de cada 6 pixeles (en X y en Y)
+$Global:ColorQuieto   = 0.0015   # menos de 0.15 % distinto entre 2 fotos = quieto (20q: como la 4; la 3 tenia 0.25 %)
+$Global:ColorQuietoMs = 200      # cuanto tiempo quieto para darlo por listo
+$Global:ColorIgual    = 0.001    # menos de 0.1 % distinto contra ANTES del Enter = quedo igual (!)
+$Global:ColorMin = @{            # minimo (ms) de cada paso aunque detecte antes
+    E1_CargaIntra      = 350     # cuenta desde el Enter de la busqueda
+    E6_CargaIntraVieja = 300     # despues de E5 (420 fijo)
+    F1_FocoEdge        = 400     # cuenta desde el Enter de la busqueda
+    F2_DespuesNota1    = 450     # 20q: como la 4 (la 3 tenia 400 y a veces daba click en Type antes de tiempo)
+    F3_DespuesNota2    = 350     # 20q: como la 4 (la 3 tenia 300)
+}
+$Global:ColorCambio = @{         # que parte de la zona tiene que cambiar (0.01 = 1 %)
+    E1_CargaIntra      = 0.003    # en la 4 no detectaba con 1 % (el PRO nuevo cambia poco)
+    E6_CargaIntraVieja = 0.004    # 20p: era 2 %. Si la vieja carga rapido (dentro de E5) solo
+                                  # cambia el PRO del buscador (~0.8 %) y esperaba 2 s de mas
+    F1_FocoEdge        = 0.003
+    F2_DespuesNota1    = 0.005
+    F3_DespuesNota2    = 0.03
+}
+# Si el color NO detecto la carga al llegar al maximo de la tabla, sigue
+# vigilando hasta estos ms EXTRA (solo cuando seguir sin que cargue rompe
+# la secuencia). Si carga antes, sigue en ese momento. En el resumen: "1350*+"
+$Global:ColorExtra = @{
+    E6_CargaIntraVieja = 2000    # 20o: una vez no cargo a tiempo y el PRO no se escribio
+}
+# Revisa que el PRO SI quedo escrito en el buscador de la intra vieja: parte
+# del buscador que tiene que cambiar al escribirlo. Si no, click y escribe otra vez.
+$Global:ColorPROescrito = 0.006   # 0.6 %
+$script:FotoBusqueda = $null
+
+function Test-ColorDisponible {
+    if (-not $Global:UsarColor) { return $false }
+    return [bool]([Motor].GetMethod('Zona'))     # motor viejo cargado en esta consola -> no
+}
+# Zona de Edge: la ventana al frente SIN la parte de arriba (pestanas,
+# direccion y el buscador de intra, donde parpadea el cursor)
+function Get-ZonaEdge {
+    $r = $null
+    try { $r = [Motor]::RectAlFrente() } catch { $r = $null }
+    if ($null -eq $r) { return $null }
+    $pb = Get-XY 'Edge_Busqueda1'
+    $x = $r[0] + 8
+    $y = [Math]::Max($r[1] + 8, $pb[1] + 25)
+    $w = ($r[2] - 8) - $x
+    $h = ($r[3] - 8) - $y
+    if ($w -lt 100 -or $h -lt 100) { return $null }
+    return @($x, $y, $w, $h)
+}
+# Zona debajo de un punto (donde se despliega la lista del tipo de nota)
+# Zona alrededor de un punto (dx, dy = esquina desde el punto)
+function Get-ZonaPunto([string]$nombre, [int]$dx, [int]$dy, [int]$w, [int]$h) {
+    $p = Get-XY $nombre
+    return @([Math]::Max(0, $p[0] + $dx), [Math]::Max(0, $p[1] + $dy), $w, $h)
+}
+# Zona vacia (casi toda de un solo color): pagina en blanco / sin dibujar todavia
+$Global:ColorVacio = 0.985
+function Test-ZonaVacia($px) {
+    if (-not [Motor].GetMethod('Uniforme')) { return $false }
+    try { return ([Motor]::Uniforme($px) -ge $Global:ColorVacio) } catch { return $false }
+}
+function Get-ZonaDebajo([string]$nombre) {
+    $p = Get-XY $nombre
+    return @(($p[0] - 60), ($p[1] + 12), 420, 260)
+}
+function Foto($zona) {
+    if ($null -eq $zona -or -not (Test-ColorDisponible)) { return $null }
+    try { return @{ Z = $zona; Px = [Motor]::Zona($zona[0], $zona[1], $zona[2], $zona[3], $Global:ColorPaso) } }
+    catch { return $null }
+}
+
+# Espera a que la pantalla cambie (contra la foto $antes) y se quede quieta.
+# $yaMs = ms que ya pasaron (para las esperas que cuentan desde el Enter).
+# En el resumen: "520*" = listo a los 520 ms; "520*!" = la pagina quedo
+# IGUAL que antes del Enter (posible PRO anterior).
+function Esperar-Pantalla([string]$k, $antes, [int]$yaMs = 0) {
+    $max = [int]$Global:ForceT[$k]
+    $extra = if ($Global:ColorExtra -and $Global:ColorExtra.Contains($k)) { [int]$Global:ColorExtra[$k] } else { 0 }
+    $tope = $max + $extra             # con foto: vigila hasta el tope; sin foto: solo el maximo
+    $min = if ($Global:ColorMin.Contains($k)) { [int]$Global:ColorMin[$k] } else { 0 }
+    $umbral = if ($Global:ColorCambio.Contains($k)) { [double]$Global:ColorCambio[$k] } else { 0.01 }
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $tCambio = -1; $tQuieto = -1; $prev = $null
+    $maxDif = 0.0; $ultMov = 0.0        # para el log: cuanto cambio / cuanto se volvio a mover
+    $vacia = $false
+    if ($null -ne $antes) {
+        while (($yaMs + $sw.ElapsedMilliseconds) -lt $tope) {
+            $px = $null
+            try { $px = [Motor]::Zona($antes.Z[0], $antes.Z[1], $antes.Z[2], $antes.Z[3], $Global:ColorPaso) } catch { $px = $null }
+            if ($null -eq $px) { $tope = $max; break }
+            $t = $yaMs + $sw.ElapsedMilliseconds
+            $dAntes = [Motor]::Diferencia($antes.Px, $px)
+            if ($dAntes -gt $maxDif) { $maxDif = $dAntes }
+            if ($tCambio -lt 0) {
+                if ($dAntes -ge $umbral) { $tCambio = $t }
+            } else {
+                $mov = [Motor]::Diferencia($prev, $px)
+                if ($mov -le $Global:ColorQuieto) {
+                    if ($tQuieto -lt 0) { $tQuieto = $t }
+                    if (($t - $tQuieto) -ge $Global:ColorQuietoMs -and $t -ge $min -and (Test-ZonaVacia $px)) {
+                        $vacia = $true; $tQuieto = -1     # quieta pero en blanco: todavia no carga
+                    } elseif (($t - $tQuieto) -ge $Global:ColorQuietoMs -and $t -ge $min) {
+                        $igual = ($dAntes -lt $Global:ColorIgual)
+                        LogT ("  espera {0}: LISTO a los {1} ms (cambio a {2} ms, {3:0.00} %, max {4}){5}" -f $k, $t, $tCambio, ($dAntes * 100), $max, $(if ($igual) { '  OJO: quedo igual que antes' } else { '' }))
+                        P $k ('{0}*{1}{2}' -f $t, $(if ($t -gt $max) { '+' } else { '' }), $(if ($igual) { '!' } else { '' }))
+                        return
+                    }
+                } else { $tQuieto = -1; $ultMov = $mov }    # se volvio a mover
+            }
+            $prev = $px
+            Start-Sleep -Milliseconds 30
+        }
+    }
+    # No se detecto (o no hay foto): espera lo que falte del maximo, como antes
+    if ($null -eq $antes) { $tope = $max }
+    $falta = $tope - $yaMs - $sw.ElapsedMilliseconds
+    if ($falta -gt 0) { Start-Sleep -Milliseconds $falta }
+    $como = if ($null -eq $antes) { 'sin foto' }
+            elseif ($tCambio -lt 0) { 'no cambio: lo mas {0:0.00} %, pide {1:0.00} %' -f ($maxDif * 100), ($umbral * 100) }
+            elseif ($vacia) { 'cambio a {0} ms pero se veia VACIA (en blanco)' -f $tCambio }
+            else { 'cambio a {0} ms, no se quedo quieta: se movia {1:0.00} %, quieto es <= {2:0.00} %' -f $tCambio, ($ultMov * 100), ($Global:ColorQuieto * 100) }
+    LogT ("  espera {0}: {1} ms completos ({2})" -f $k, $tope, $como)
+    P $k $(if ($tope -gt $max) { "$tope+" } else { $max })
+}
+
+# Carga despues del Enter de la busqueda: por color si se puede; si no (o si
+# ya paso el maximo), como antes (EsperarDesdeBusqueda)
+function EsperarCargaBusqueda([string]$k, [int]$minMs = 0) {
+    if ((Test-ColorDisponible) -and $null -ne $script:FotoBusqueda -and $script:TEnterBusqueda -ge 0) {
+        $ya = $script:RelojMotor.ElapsedMilliseconds - $script:TEnterBusqueda
+        if ($ya -lt [int]$Global:ForceT[$k]) { Esperar-Pantalla $k $script:FotoBusqueda $ya; return }
+    }
+    EsperarDesdeBusqueda $k $minMs
+}
+
+# Espera de carga contada desde el Enter de la ultima busqueda en intra:
+# si ya paso ese tiempo (por ejemplo mientras se revisaba la busqueda o
+# mientras escribias la terminal), no espera de mas. Minimo $minMs.
+function EsperarDesdeBusqueda([string]$k, [int]$minMs = 0) {
+    $max = [int]$Global:ForceT[$k]
+    $ya = 0
+    if ($script:TEnterBusqueda -ge 0) { $ya = $script:RelojMotor.ElapsedMilliseconds - $script:TEnterBusqueda }
+    $falta = [Math]::Max($minMs, $max - $ya)
+    LogT ("  espera {0} = {1} ms (ya pasaron {2} ms desde la busqueda, espero {3} ms)" -f $k, $max, $ya, $falta)
+    P $k $falta
+    if ($falta -gt 0) { Start-Sleep -Milliseconds $falta }
+}
+
+# Si Edge ya no esta al frente (algo le robo el foco), lo regresa
+function Asegurar-Edge {
+    if ([Motor]::ProcesoAlFrente() -ne 'msedge') {
+        Paso "Foco perdido (al frente: $([Motor]::ProcesoAlFrente())) -> regreso a Edge"
+        Traer-Edge
+        Esperar 200
+    }
+}
+
+# Tecla o combinacion "de mano" para el Escritorio Remoto (scan code + pausas).
+# Si en esta consola sigue cargado un motor viejo (sin ComboLenta), usa SendKeys.
+function TeclaMano([int]$mod, [int]$vk, [bool]$ext, [string]$enSendKeys, [int]$holdMs = $Global:TeclaManoMs) {
+    Paso "Tecla de mano: $enSendKeys"
+    if ([Motor].GetMethod('ComboLenta')) { [Motor]::ComboLenta([byte]$mod, [byte]$vk, $ext, $holdMs) }
+    else { Teclas $enSendKeys }
+}
+
+# PRO lookup
+# Copia el PRO de la bill abierta en el ERP (doble click, Shift+End, Ctrl+C)
+# Espera a que llegue al portapapeles y reintenta 1 vez. Devuelve el PRO.
+function Copiar-PRO {
+    param([switch]$MediaBill)    # -MediaBill: lookup a media bill (no cuenta para el aviso de mismo PRO)
+    $F = $Global:ForceT
+    $swParte = [System.Diagnostics.Stopwatch]::StartNew()
+    $script:UltPortaMs = -1
+    Traer-ERP $F.C1_FocoERP 'C1_FocoERP' | Out-Null
+    $pro = ''
+    for ($intento = 1; $intento -le 3 -and -not $pro; $intento++) {
+        if ($intento -gt 1) {
+            # Reintento: cuando falla es porque NO se selecciono el PRO (no
+            # porque el ERP este ocupado), asi que el 2o intento va de inmediato.
+            # El 3o espera un poco por si acaso.
+            if ($intento -ge 3) { Esperar 300 }
+            Traer-ERP $F.C1_FocoERP 'C1_FocoERP' | Out-Null
+        }
+        Paso "PRO intento $intento de 3"
+        try { [System.Windows.Forms.Clipboard]::Clear() } catch {}
+        DobleClickXY 'ERP_CampoPRO'
+        if ($intento -eq 1) {
+            EsperarT 'C2_DespuesDobleClick'
+            # 1er intento: Inicio + Shift+Fin + Ctrl+C con teclas "de mano" cortas
+            # (con SendKeys rapido fallaba 1 de cada 3 y el reintento costaba ~1.3 s)
+            TeclaMano 0 0x24 $true '{HOME}' $Global:TeclaMano1Ms
+            Esperar 40
+            TeclaMano 0x10 0x23 $true '+{END}' $Global:TeclaMano1Ms
+            EsperarT 'C3_DespuesShiftEnd'
+            TeclaMano 0x11 0x43 $false '^c' $Global:TeclaMano1Ms
+            $pro = Esperar-Portapapeles $Global:EsperaPRO1ms
+        } else {
+            # Reintento: cuando falla, el cursor queda en el campo pero NO se
+            # selecciona nada. Vuelve a seleccionar TODO el campo con teclas
+            # "de mano": Inicio y luego Shift+Fin, y copia. Como el Inicio ya
+            # pone el cursor al principio, despues del doble click basta 150 ms.
+            # El 3er intento espera 150 ms mas en cada paso.
+            $extra = if ($intento -ge 3) { 150 } else { 0 }
+            Esperar (150 + $extra)
+            Paso 'Reintento: selecciona todo el campo otra vez (Inicio + Shift+Fin)'
+            TeclaMano 0 0x24 $true '{HOME}'
+            Esperar 80
+            TeclaMano 0x10 0x23 $true '+{END}'
+            EsperarT 'C3_DespuesShiftEnd'
+            Esperar $extra
+            TeclaMano 0x11 0x43 $false '^c'
+            $pro = Esperar-Portapapeles $(if ($intento -ge 3) { $Global:EsperaPROms } else { 1000 })
+        }
+        # Sin filtro de formato: el PRO puede venir con guiones (xxx-xxxxxx-x)
+        # y con cualquier numero de digitos. Solo tiene que haber algo copiado.
+    }
+    Teclas '{HOME}'                   # quita la seleccion del PRO
+    # Alt+C = cierra la parte del PRO (tambien en el lookup a media bill: si
+    # se queda abierta y le picas sin querer, se reinicia toda la bill)
+    Teclas '%c'
+    EsperarT 'C4_DespuesAltC'
+    if (-not $pro) {
+        P 'C_intentos' '3!'
+        P 'C_llego' 'no'
+        throw "The PRO was not copied after 3 tries. Check that the bill is open and saved."
+    }
+    Paso "PRO copiado ($($pro.Length) caracteres)"
+    # Solo AVISA si es el mismo PRO que la bill anterior (no lo bloquea)
+    if (-not $MediaBill) {
+        $script:MismoPRO = [bool]($script:PROAnterior -and $pro -eq $script:PROAnterior)
+        if ($script:MismoPRO) { Paso 'AVISO: es el mismo PRO que la bill anterior' }
+        $script:PROAnterior = $pro             # solo en memoria
+    }
+    P 'C_intentos' $(if ($intento - 1 -gt 1) { "$($intento - 1)!" } else { $intento - 1 })
+    P 'C_llego' $(if ($script:UltPortaMs -ge 0) { $script:UltPortaMs } else { '?' })
+    return $pro
+}
+
+# Pega el PRO en el primer buscador de intra y le da Enter (pasos 1-2)
+# Mueve el mouse al punto, espera (como si lo pasaras por encima) y da click
+function MoverEsperarClick([string]$nombre, [string]$kHover, [string]$kDespues) {
+    $p = Get-XY $nombre
+    Paso "Mover a $nombre ($($p[0]),$($p[1])) y esperar"
+    [Motor]::SetCursorPos($p[0], $p[1]) | Out-Null
+    EsperarT $kHover
+    ClickXY $nombre
+    EsperarT $kDespues
+}
+
+# Desde el resultado de la intra normal: ir a la intra vieja y buscar el PRO
+# (pasos 3-5). Lo usan PRO F2 y la nota intra de F1.
+function Ir-IntraVieja {
+    $F = $Global:ForceT
+    $swParte = [System.Diagnostics.Stopwatch]::StartNew()
+    # Espera a que cargue, pone el mouse encima,
+    # espera y LUEGO da click (algunos menus se abren al pasar el mouse)
+    EsperarCargaBusqueda 'E1_CargaIntra'
+    MoverEsperarClick 'Edge_Nav1' 'E2_HoverNav1' 'E3_DespuesNav1'
+    # 2o click: foto antes del click; E5 se queda fijo (NO BAJAR) y E6 (carga
+    # de la intra vieja) sigue en cuanto la pagina cambio y se quedo quieta
+    $p = Get-XY 'Edge_Nav2'
+    Paso "Mover a Edge_Nav2 ($($p[0]),$($p[1])) y esperar"
+    [Motor]::SetCursorPos($p[0], $p[1]) | Out-Null
+    EsperarT 'E4_HoverNav2'
+    # Foto SOLO de la zona del buscador viejo (106,696): sigue cuando ESA parte
+    # ya cambio, se quedo quieta y no esta vacia (antes era toda la pantalla y
+    # se adelantaba con la pagina a medio cargar)
+    $fotoVieja = Foto (Get-ZonaPunto 'Edge_Busqueda2' -100 -60 500 120)
+    ClickXY 'Edge_Nav2'
+    EsperarT 'E5_DespuesNav2'
+    Esperar-Pantalla 'E6_CargaIntraVieja' $fotoVieja
+    # Click en el buscador viejo y escribe el PRO. Revisa por color que SI se
+    # escribio (la foto se toma despues del Ctrl+A: si el click no agarro el
+    # buscador, escribir no cambia nada). Si no se ve, click y escribe otra vez.
+    $escrito = $false
+    for ($vez = 1; $vez -le 2 -and -not $escrito; $vez++) {
+        if ($vez -gt 1) {
+            Paso 'El PRO no se ve en el buscador viejo: click y escribir otra vez'
+            Esperar 300
+        }
+        ClickXY 'Edge_Busqueda2'
+        EsperarT 'E7_DespuesClickBusca'
+        # Vuelve a poner el PRO en el portapapeles por si algo lo cambio
+        if (-not $Global:IntraTeclear -and $script:UltimoPRO) { try { [System.Windows.Forms.Clipboard]::SetText($script:UltimoPRO) } catch {} ; EsperarT 'E8_PROalPortapapeles' }
+        Teclas '^a'                       # reemplaza lo que hubiera en el buscador
+        $antesPRO = Foto-Buscador 'Edge_Busqueda2'
+        Escribir-PRO
+        EsperarT 'E9_DespuesPegarPRO'
+        $escrito = Test-PROescrito $antesPRO 'buscador viejo'
+    }
+    P 'E_intentos' $(if (-not $escrito) { 'no!' } elseif ($vez -gt 2) { '2!' } else { '1' })
+    Enter-Busqueda 'intra vieja' 'Edge_Busqueda2'
+    $script:EdgeEnIntra = 'vieja'
+}
+
+# Foto chiquita de un buscador (paso 2 = mas fina, para ver el texto)
+function Foto-Buscador([string]$punto) {
+    if (-not (Test-ColorDisponible)) { return $null }
+    $z = Get-ZonaPunto $punto -110 -12 360 24
+    try { return @{ Z = $z; Px = [Motor]::Zona($z[0], $z[1], $z[2], $z[3], 2) } } catch { return $null }
+}
+# True si el buscador cambio desde la foto (= el PRO si se escribio).
+# Sin color no se puede revisar: lo da por bueno (como antes).
+function Test-PROescrito($antes, [string]$donde) {
+    if ($null -eq $antes) { return $true }
+    $px = $null
+    try { $px = [Motor]::Zona($antes.Z[0], $antes.Z[1], $antes.Z[2], $antes.Z[3], 2) } catch { return $true }
+    $d = [Motor]::Diferencia($antes.Px, $px)
+    $ok = ($d -ge $Global:ColorPROescrito)
+    LogT ("  PRO en {3}: cambio {0:0.00} % (pide {1:0.00} %) -> {2}" -f ($d * 100), ($Global:ColorPROescrito * 100), $(if ($ok) { 'SI se escribio' } else { 'NO se ve' }), $donde)
+    return $ok
+}
+
+# Pone el PRO en el buscador de la intra TECLEADO (cada tecla le llega a la
+# pagina y si registra el PRO nuevo; con Ctrl+V a veces la pagina buscaba el
+# PRO anterior, aunque hiciera la animacion de buscar).
+# $Global:IntraTeclear = $false -> vuelve a pegarlo con Ctrl+V como antes.
+# (No se escribe el PRO en el log: solo cuantos caracteres)
+$Global:IntraTeclear = $true
+function Escribir-PRO {
+    $pro = $script:UltimoPRO
+    if ($Global:IntraTeclear -and $pro) {
+        $esc = -join ($pro.ToCharArray() | ForEach-Object {
+            if ('+^%~(){}[]'.Contains([string]$_)) { '{' + $_ + '}' } else { [string]$_ } })
+        Paso "Tecleando el PRO en el buscador ($($pro.Length) caracteres)"
+        [System.Windows.Forms.SendKeys]::SendWait($esc)
+    } else {
+        Teclas '^v'
+    }
+}
+
+function Buscar-PRO-Intra {
+    $F = $Global:ForceT
+    $swParte = [System.Diagnostics.Stopwatch]::StartNew()
+    Traer-Edge
+    EsperarT 'D1_FocoEdge'
+    # Igual que en la intra vieja: escribe el PRO tecleado y revisa por color
+    # que SI quedo en el buscador. Si no se ve, click y escribe otra vez.
+    $escrito = $false
+    for ($vez = 1; $vez -le 2 -and -not $escrito; $vez++) {
+        if ($vez -gt 1) {
+            Paso 'El PRO no se ve en el buscador de la intra: click y escribir otra vez'
+            Esperar 300
+            Asegurar-Edge
+        }
+        ClickXY 'Edge_Busqueda1'
+        EsperarT 'D2_DespuesClickBusca'
+        # Selecciona lo que ya hubiera en el buscador (PRO anterior) para que
+        # lo escrito lo reemplace en vez de quedar al lado
+        Teclas '^a'
+        # Aqui el buscador puede traer el PRO anterior: 40 ms para que se pinte
+        # la seleccion y la foto la incluya (si es el mismo PRO, igual se ve el cambio)
+        Esperar 40
+        $antesPRO = Foto-Buscador 'Edge_Busqueda1'
+        Escribir-PRO
+        EsperarT 'D3_DespuesPegarPRO'
+        $escrito = Test-PROescrito $antesPRO 'buscador de la intra'
+    }
+    P 'D_intentos' $(if (-not $escrito) { 'no!' } elseif ($vez -gt 2) { '2!' } else { '1' })
+    Enter-Busqueda 'intra normal' 'Edge_Busqueda1'
+}
+
+# PRO lookup FORCE 1: solo intra normal (pasos 1-2)
+function Invoke-ProLookupF1 {
+    Paso '=== INICIO PRO lookup F1 ==='
+    try {
+        $script:UltimoPRO = Copiar-PRO
+        Buscar-PRO-Intra
+        $script:EdgeEnIntra = 'normal'
+        Paso '=== FIN PRO lookup F1: OK ==='
+        return $true
+    } catch {
+        Fallo $_ 'PRO lookup F1'
+        return $false
+    }
+}
+
+# PRO lookup FORCE 2: intra normal + intra vieja (pasos 1-5)
+function Invoke-ProLookup {
+    Paso '=== INICIO PRO lookup F2 ==='
+    try {
+        $script:UltimoPRO = Copiar-PRO
+        Buscar-PRO-Intra
+        Ir-IntraVieja
+        Paso '=== FIN PRO lookup F2: OK ==='
+        return $true
+    } catch {
+        Fallo $_ 'PRO lookup F2'
+        return $false
+    }
+}
+
+# ---------------------------------------------------------------------
+#  SOLO PRO LOOKUP, SIN NOTAS (a media bill, antes de llegar a las notas)
+#   Ctrl + Insert = F1: copia el PRO -> lo busca en la intra normal
+#   Ctrl + RePag  = F2: copia el PRO -> intra normal -> HU status ->
+#                           intra vieja (para ver la terminal)
+#  No pega notas y no pide terminal. Si cierra la parte del PRO (Alt+C), como las secuencias completas,
+#  y no cuenta para el aviso de "mismo PRO que la bill anterior".
+# ---------------------------------------------------------------------
+function Invoke-SoloPRO([bool]$dosIntras) {
+    $tipo = if ($dosIntras) { 'F2 (2 intras)' } else { 'F1 (intra normal)' }
+    $propio = ($null -eq $Global:LogBuffer -and $Global:LogArchivo -eq 1)
+    if ($propio) { $Global:LogBuffer = New-Object System.Collections.ArrayList }
+    $script:MotorCorriendo = $true
+    try {
+        Hide-Watermark
+        Show-NoMover
+        Paso "=== INICIO PRO lookup sin notas: $tipo ==="
+        $script:UltimoPRO = Copiar-PRO -MediaBill
+        Buscar-PRO-Intra
+        $script:EdgeEnIntra = 'normal'
+        if ($dosIntras) { Ir-IntraVieja }
+        Paso '=== FIN PRO lookup sin notas: OK ==='
+    } catch {
+        Fallo $_ "PRO lookup $tipo"
+    } finally {
+        Hide-NoMover
+        $script:MotorCorriendo = $false
+        Vaciar-LogMotor
+        if ($propio) { $Global:LogBuffer = $null }
+    }
+}
+
+# Medir una coordenada: 5 s para poner el mouse en el punto
+function Medir-Punto {
+    Start-Sleep -Seconds 5
+    $p = New-Object Motor+POINT
+    [Motor]::GetCursorPos([ref]$p) | Out-Null
+    [System.Windows.Forms.MessageBox]::Show("X = $($p.X)`nY = $($p.Y)", 'Mouse position') | Out-Null
+}
+
+Paso ("Motor cargado. Coord=" + $Global:Coord + " | archivo de mis coords: " + $(if (Test-Path $Global:ArchivoCoords) { 'SI' } else { 'NO (usa la lista base)' }))
+
+#endregion MOTOR
+
+$script:MotorOK        = $false
+$script:MotorError     = ''
+$script:MotorCorriendo = $false
+$script:BtnErp         = ''
+$script:BtnIntra       = ''
+$script:BtnForce       = ''
+$script:UltimoPRO      = ''      # solo en memoria, nunca en disco
+$script:PROAnterior    = ''      # PRO de la bill anterior (solo en memoria)
+$script:MismoPRO       = $false  # el PRO de esta bill es igual al anterior
+$script:EdgeEnIntra    = ''      # donde dejo Edge el ultimo PRO lookup: 'normal' (F1) / 'vieja' (F2)
+$script:UltimoForce    = ''      # PRO lookup a usar: 'f1' (solo intra) o 'haz' (las 2 intras)
+
+if ($UsarBotonesMotor) {
+    try {
+        if (-not ('Motor' -as [type])) { throw 'the motor part did not load' }
+        $script:MotorOK = $true
+    } catch { $script:MotorError = 'motor failed to load: ' + $_.Exception.Message }
+}
+
+# Se llama desde Finish-Notes: recuerda la ultima nota ERP y la de intra
+function Set-NotasBotones([string]$intra, [string]$erp, [bool]$pendingHold, [string]$terminal = '') {
+    # Que PRO lookup usar:
+    #   - F2 (haz)               -> el original (las 2 intras)
+    #   - F1 que lleva HOLD (cons) -> tambien el original, como F2
+    #   - F1 sin hold            -> el de F1 (solo intra)
+    if ($script:CurrentForce -eq 'haz') {
+        $script:UltimoForce = 'haz'
+    } elseif ($script:CurrentForce -eq 'f1') {
+        $conHold = $pendingHold -or [bool]$terminal
+        if (-not $conHold) { try { $conHold = [bool](Test-NeedsHold) } catch { } }
+        $script:UltimoForce = if ($conHold) { 'haz' } else { 'f1' }
+    } else {
+        $script:UltimoForce = ''
+    }
+
+    # Nota nueva = se olvida la anterior (para no pegar la de otra bill)
+    if ($erp -and ($script:CurrentForce -eq 'f1' -or $script:CurrentForce -eq 'haz')) {
+        $script:BtnErp   = $erp.ToUpper()
+        $script:BtnForce = if ($script:CurrentForce -eq 'f1') { 'FORCE1' } else { 'FORCE2' }
+    } else {
+        $script:BtnErp = ''; $script:BtnForce = ''
+    }
+    if ($terminal) {
+        # Paso de terminal de la MISMA nota: si la nota ERP ya se pego, no se vuelve a ofrecer
+        if ($script:BtnErp -and $script:BtnErp -eq $script:ErpYaPegada) { $script:BtnErp = ''; $script:BtnForce = '' }
+    } else {
+        $script:ErpYaPegada = ''      # nota nueva
+    }
+    if ($pendingHold) { $script:BtnIntra = '' }        # falta la terminal
+    elseif ($intra)   { $script:BtnIntra = $intra.ToUpper() }
+}
+
+# Ejecuta UNA accion del motor. Devuelve $true si salio bien.
+# (no revisa si el motor esta ocupado; eso lo hace quien la llama con Test-MotorListo)
+function Run-Accion([string]$accion) {
+    $ok = $false
+    switch ($accion) {
+        'pro1'  { $ok = Invoke-ProLookupF1 }
+        'pro'   { $ok = Invoke-ProLookup }
+        'erp'   { $ok = Invoke-NotaERP -Force $script:BtnForce -Nota $script:BtnErp }
+        'intra' { $ok = Invoke-NotaIntra -Nota $script:BtnIntra }
+    }
+    if ($ok) {
+        # Cada nota se pega UNA vez; para volver a pegarla, sacala del
+        # historial (3/4/5 en la pantalla inicial) y se vuelve a cargar.
+        if ($accion -eq 'erp')   { $script:ErpYaPegada = $script:BtnErp; $script:BtnErp = ''; $script:BtnForce = '' }
+        if ($accion -eq 'intra') { $script:BtnIntra = '' }
+        # Sin avisos de "PRO buscado" etc.: solo VERIFY AND SAVE al pegar una nota
+        if ($accion -eq 'erp' -or $accion -eq 'intra') { Show-Verificar }
+    }
+    return [bool]$ok
+}
+
+function Test-MotorListo {
+    if ($script:MotorCorriendo) { return $false }
+    if (-not $script:MotorOK) { Show-Flag 'Buttons' $script:MotorError; return $false }
+    if ($script:State -ne 'hidden' -and $script:State -ne 'done' -and $script:State -ne 'nivel1') {
+        Show-Flag 'Buttons' 'finish the note first (or Esc to the start screen)'
+        return $false
+    }
+    return $true
+}
+
+# Cierra el menu antes de que el motor haga clicks, SIN perder la nota
+# pendiente de hold (Close-Menu normalmente la borra)
+function Close-MenuParaBoton {
+    if ($script:State -eq 'hidden') { return }
+    $ph = $script:PendingHold
+    Close-Menu
+    $script:PendingHold = $ph
+    Start-Sleep -Milliseconds 150
+}
+
+# ---------------------------------------------------------------------
+#  Estado del flujo automatico entre la terminal y la nota intra
+#  (con hold: despues del PRO pide la terminal y al dar Enter pega intra).
+#  Se detiene en el primer paso que falle. Tu siempre guardas.
+# ---------------------------------------------------------------------
+$script:AutoTrasTerminal = $false
+$script:ErpYaPegada      = ''    # nota ERP que ya se pego (para no pegarla 2 veces)
+
+# Abre la pantalla de terminal (como Insert). Al dar Enter ahi se pega
+# sola la nota de intra (y la del ERP si todavia no se habia pegado).
+function Abrir-TerminalAuto {
+    $script:AutoTrasTerminal = $true
+    Hide-Watermark
+    if ($script:State -eq 'hidden') {
+        Save-PrevForeground
+        $Win.Visibility = 'Visible'
+        Set-MenuFocus
+    }
+    Enter-Terminal
+}
+
+# Se llama despues de dar la terminal (Enter) en el flujo automatico
+function Start-AutoTrasTerminal {
+    if (-not $script:AutoTrasTerminal) { return }
+    $script:AutoTrasTerminal = $false
+    # Pequena espera para que el menu termine de cerrarse
+    $t = New-Object System.Windows.Threading.DispatcherTimer
+    Usuario-Fin 'terminal dada'
+    LogT "  espera G1_TrasTerminal = $($Global:ForceT.G1_TrasTerminal) ms"
+    P 'G1_TrasTerminal' $Global:ForceT.G1_TrasTerminal
+    $t.Interval = [TimeSpan]::FromMilliseconds($Global:ForceT.G1_TrasTerminal)
+    $t.Add_Tick({
+        param($s, $e)
+        $s.Stop()
+        if (-not (Test-MotorListo)) { return }
+        $script:MotorCorriendo = $true
+        Show-NoMover
+        try {
+            if (Run-Accion 'intra') {
+                if ($script:BtnErp) { Run-Accion 'erp' | Out-Null }   # solo si no se habia pegado
+            }
+        } catch {
+            Show-Flag 'AUTO' $_.Exception.Message
+        } finally {
+            $script:MotorCorriendo = $false
+            Hide-NoMover
+            Cerrar-LogTiempos $(if ($script:WatermarkGhost.Text -eq 'VERIFY' -or $script:WatermarkGhost.Text -eq 'CHECK') { 'OK' } else { 'ERROR' })
+        }
+    })
+    $t.Start()
+}
+
+# ---------------------------------------------------------------------
+#  FLUJO AUTOMATICO (sin botones), arranca al dar Enter en "revisar"
+#   Fase 1: pega la nota ERP -> espera a que guardes (Enter / Alt+O)
+#   Fase 2: F1 sin hold : PRO F1 -> intra vieja -> informational -> pega nota
+#           con hold    : PRO (2 intras) -> pide terminal -> Enter pega intra
+#  Se detiene en el primer paso que falle. Tu siempre guardas.
+# ---------------------------------------------------------------------
+$script:EsperandoGuardar = $false
+$script:EsperaLimite     = Get-Date
+$script:OArmed           = $true
+$script:EnterArmed       = $true
+
+function Start-FlujoAuto {
+    if (-not $script:MotorOK) { Show-Flag 'Auto flow' $script:MotorError; return }
+    if (-not $script:BtnErp) { return }        # solo notas F1 / F2
+    $script:EsperandoGuardar = $false
+    $script:MismoPRO = $false                  # bill nueva: todavia no hay PRO
+    $tipoF = if ($script:UltimoForce -eq 'haz') { "$($script:BtnForce) (2 intras)" } else { "$($script:BtnForce) (intra normal)" }
+    Iniciar-LogTiempos $tipoF
+    LogT "  espera A1_CierraMenu = $($Global:ForceT.A1_CierraMenu) ms (se cierra el menu)"
+    P 'A1_CierraMenu' $Global:ForceT.A1_CierraMenu
+    $t = New-Object System.Windows.Threading.DispatcherTimer
+    $t.Interval = [TimeSpan]::FromMilliseconds($Global:ForceT.A1_CierraMenu)    # que el menu termine de cerrarse
+    $t.Add_Tick({
+        param($s, $e)
+        $s.Stop()
+        if (-not (Test-MotorListo)) { return }
+        $script:MotorCorriendo = $true
+        $ok = $false
+        try {
+            Show-NoMover
+            Paso '=== FLUJO AUTO fase 1: nota ERP ==='
+            # Antes de cualquier secuencia F1/F2: click en 110,217 (punto Inicio_Click)
+            # para darle el foco a esa parte del ERP (primero se asegura que el ERP este al frente)
+            Traer-ERP $Global:ForceT.A2_FocoERP 'A2_FocoERP' -Siempre | Out-Null
+            ClickXY 'Inicio_Click'
+            EsperarT 'A0_DespuesClickInicio'
+            $ok = Run-Accion 'erp'
+        } catch {
+            Show-Flag 'Auto flow' $_.Exception.Message
+        } finally {
+            $script:MotorCorriendo = $false
+        }
+        if (-not $ok) { Hide-NoMover; Cerrar-LogTiempos 'ERROR en la nota ERP'; return }  # el motor ya mostro donde fallo
+        $script:EsperandoGuardar = $true
+        $script:EsperaLimite = (Get-Date).AddMinutes($Global:EsperaMaxGuardarMin)
+        # Limpia lo "apretado desde la ultima revision" de Enter / O / Alt (el
+        # Enter con el que cerraste el menu, la O de FORCE1, el Alt del foco)
+        foreach ($vk in 0x0D, 0x4F, 0x12) { [void][LocalKeyState]::GetAsyncKeyState($vk) }
+        $script:OArmed = $false                # ignora una O que ya estuviera apretada
+        $script:EnterArmed = $false            # y el Enter con el que cerraste el menu
+        Show-Enter                             # verde: PRESS ENTER (o Alt+O)
+        Usuario-Inicio 'des Enter / Alt+O en el ERP'
+    })
+    $t.Start()
+}
+
+function Stop-FlujoAuto([string]$porque) {
+    $script:EsperandoGuardar = $false
+    Paso "Flujo auto detenido: $porque"
+    Usuario-Fin 'cancelado'
+    Cerrar-LogTiempos "CANCELADO ($porque)"
+    Show-Flag 'Auto flow' $porque
+}
+
+function Start-FlujoFase2([int]$esperaMs) {
+    $script:EsperandoGuardar = $false
+    Show-NoMover                               # rojo: DON'T MOVE
+    LogT "  espera B1_DespuesGuardar = $esperaMs ms (que el ERP guarde)"
+    P 'B1_DespuesGuardar' $esperaMs
+    $t = New-Object System.Windows.Threading.DispatcherTimer
+    $t.Interval = [TimeSpan]::FromMilliseconds([Math]::Max($esperaMs, 100))   # que el ERP termine de guardar
+    $t.Add_Tick({
+        param($s, $e)
+        $s.Stop()
+        if (-not (Test-MotorListo)) { return }
+        $script:MotorCorriendo = $true
+        $abrirTerminal = $false
+        try {
+            Paso "=== FLUJO AUTO fase 2: PRO + intra (lookup: $($script:UltimoForce)) ==="
+            # Solo F2 o F1 con cons ('haz') pasan por HU status / intra vieja.
+            # Cualquier otro F1 va solo a la intra normal.
+            if ($script:UltimoForce -ne 'haz') {
+                if (Run-Accion 'pro1') {
+                    if ($script:BtnIntra) { Run-Accion 'intra' | Out-Null }
+                }
+            } else {
+                if (Run-Accion 'pro') {
+                    if ($script:BtnIntra) { Run-Accion 'intra' | Out-Null }      # terminal ya dada
+                    elseif ($script:PendingHold) { $abrirTerminal = $true }
+                }
+            }
+        } catch {
+            Show-Flag 'Auto flow' $_.Exception.Message
+        } finally {
+            $script:MotorCorriendo = $false
+        }
+        Hide-NoMover                           # si fallo algo, quita el DON'T MOVE
+        if ($abrirTerminal) {
+            Usuario-Inicio 'escribas la terminal y des Enter'
+            Abrir-TerminalAuto
+        } else {
+            Cerrar-LogTiempos $(if ($script:WatermarkGhost.Text -eq 'VERIFY' -or $script:WatermarkGhost.Text -eq 'CHECK') { 'OK' } else { 'ERROR' })
+        }
+    })
+    $t.Start()
+}
+
+# ===================== SWITCH AUDIT (ON / OFF) =====================
+# Botoncito chico abajo a la derecha, SOLO se ve con el menu abierto.
+# Click = prende / apaga Ctrl izq + Abajo. Arranca APAGADO ($AuditPrendidoAlInicio).
+function Set-AuditActivo([bool]$on) {
+    $script:AuditActivo = $on
+    if ($script:SwAuditTxt) {
+        $col = if ($on) { '#3FB950' } else { $C.Dim }
+        $script:SwAuditTxt.Text = if ($on) { 'AUDIT ON' } else { 'AUDIT OFF' }
+        $script:SwAuditTxt.Foreground = B $col
+        $script:SwAuditBtn.BorderBrush = B $col
+        $script:SwAuditBtn.Background  = B (Get-Soft $col)
+    }
+    Paso ("Switch audit: " + $(if ($on) { 'ON' } else { 'OFF' }))
+}
+
+if ($UsarBotonesMotor) {
+    $SwAudit = New-Object System.Windows.Window
+    $SwAudit.WindowStyle        = 'None'
+    $SwAudit.AllowsTransparency = $true
+    $SwAudit.Background         = 'Transparent'
+    $SwAudit.Topmost            = $true
+    $SwAudit.ShowInTaskbar      = $false
+    $SwAudit.ShowActivated      = $false
+    $SwAudit.ResizeMode         = 'NoResize'
+    $SwAudit.SizeToContent      = 'WidthAndHeight'
+    $SwAudit.Add_SourceInitialized({
+        param($s, $e)
+        $h = (New-Object System.Windows.Interop.WindowInteropHelper($SwAudit)).Handle
+        [LocalKeyState]::HideFromAltTab($h)
+        try { [Motor]::NoActivate($h) } catch { }      # darle click no le quita el foco al ERP
+    })
+
+    $swBorde = New-Object System.Windows.Controls.Border
+    $swBorde.Background      = B '#E616191D'
+    $swBorde.BorderBrush     = B $C.KeyBorder
+    $swBorde.BorderThickness = '1'
+    $swBorde.CornerRadius    = '6'
+    $swBorde.Padding         = '2,2,2,2'
+    $swBorde.Cursor          = 'SizeAll'
+    $swBorde.Add_MouseLeftButtonDown({ param($s, $e) if ($e.OriginalSource -eq $s) { try { $SwAudit.DragMove() } catch { } } })
+
+    $script:SwAuditBtn = New-Object System.Windows.Controls.Border
+    $script:SwAuditBtn.BorderThickness = '1'
+    $script:SwAuditBtn.CornerRadius    = '4'
+    $script:SwAuditBtn.Padding         = '5,1,5,1'
+    $script:SwAuditBtn.Cursor          = 'Hand'
+    $script:SwAuditTxt = New-Text 'AUDIT OFF' 9 $C.Dim 'Bold'
+    $script:SwAuditTxt.HorizontalAlignment = 'Center'
+    $script:SwAuditBtn.Child = $script:SwAuditTxt
+    $script:SwAuditBtn.Add_MouseLeftButtonUp({
+        param($s, $e)
+        $e.Handled = $true
+        Set-AuditActivo (-not $script:AuditActivo)
+    })
+    $swBorde.Child = $script:SwAuditBtn
+    $SwAudit.Content = $swBorde
+
+    $SwAudit.Add_Loaded({
+        param($s, $e)
+        $wa = [System.Windows.SystemParameters]::WorkArea
+        $SwAudit.Left = $wa.Right  - $SwAudit.ActualWidth  - 16
+        $SwAudit.Top  = $wa.Bottom - $SwAudit.ActualHeight - 16
+    })
+    Set-AuditActivo $AuditPrendidoAlInicio
+    $SwAudit.Show()
+    $SwAudit.Visibility = 'Hidden'
+
+    # Solo se ve mientras el menu esta abierto (no tapa la pantalla)
+    $script:SwAuditTimer = New-Object System.Windows.Threading.DispatcherTimer
+    $script:SwAuditTimer.Interval = [TimeSpan]::FromMilliseconds(150)
+    $script:SwAuditTimer.Add_Tick({
+        $quiero = if ($Win.Visibility -eq 'Visible') { 'Visible' } else { 'Hidden' }
+        if ($SwAudit.Visibility -ne $quiero) { $SwAudit.Visibility = $quiero }
+    })
+    $script:SwAuditTimer.Start()
+}
+
+
+
+[System.Windows.Threading.Dispatcher]::Run()
